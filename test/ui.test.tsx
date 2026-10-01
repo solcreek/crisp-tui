@@ -163,7 +163,7 @@ test("cached conversation and sidebar render while the network request is still 
   expect(ui.captureCharFrame()).not.toContain("saved copy")
 })
 
-test("cold navigation shows the selected header immediately and cannot steal focus after loading", async () => {
+test("cold navigation renders messages before details and cannot steal focus after loading", async () => {
   const client = demoClient(), store = new Store(client), get = client.get
   await store.refresh()
   const wait = Promise.withResolvers<void>()
@@ -171,7 +171,8 @@ test("cold navigation shows the selected header immediately and cannot steal foc
   ui = await testRender(() => <App store={store} />, { width: 140, height: 40 })
   ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter()
   try {
-    await frame("Demo Customer B  ·  unresolved", "Loading messages…", "Loading details…")
+    await frame("Demo Customer B  ·  unresolved", "How do I invite my teammates?", "Loading details…")
+    expect(ui.captureCharFrame()).not.toContain("Loading messages…")
     expect(store.state.selectedSession).toBe("session_demo_2")
     expect(ui.captureCharFrame()).not.toContain("Choose a conversation")
     ui.mockInput.pressEscape(); await Bun.sleep(50)
