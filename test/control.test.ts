@@ -51,3 +51,48 @@ test("socket snapshots remain responsive while refresh is waiting on network I/O
     expect(await request(p, "messages", {}, 1000)).toHaveLength(1)
   } finally { release.resolve(); await refreshing }
 })
+
+for (const reason of ["timeout", "disconnect", "shutdown"] as const) test(`${reason} cancels queued socket commands; shutdown drains active reads`, async () => {
+  const { createConnection } = await import("node:net")
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const list = client.list, started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  client.list = async (...args) => { started.resolve(); await release.promise; return list(...args) }
+  const received = Promise.withResolvers<void>(), aborted = Promise.withResolvers<void>(), handle = controller(store)
+  const p = await path(), server = await serve(p, (method, params, context) => {
+    if (method === "draft") {
+      received.resolve()
+      context.signal!.addEventListener("abort", () => aborted.resolve(), { once: true })
+    }
+    return handle(method, params, context)
+  })
+  cleanups.push(() => server.stop())
+  const refreshing = request(p, "refresh").catch(() => {})
+  await started.promise
+  let socket: ReturnType<typeof createConnection> | undefined
+  let drafting: Promise<unknown> | undefined
+  let stopped: Promise<void> | undefined
+  try {
+    if (reason === "timeout") drafting = request(p, "draft", { session: "session_demo_2", text: "expired" }, 100).catch(e => e)
+    else {
+      socket = createConnection(p)
+      socket.on("error", () => {})
+      socket.on("connect", () => socket!.write(JSON.stringify({ id: 1, method: "draft", params: { session: "session_demo_2", text: "cancelled" } }) + "\n"))
+    }
+    await received.promise
+    if (reason === "timeout") expect((await drafting as Error).message).toContain("timed out")
+    else if (reason === "disconnect") socket!.destroy()
+    else {
+      let drained = false
+      stopped = server.stop().then(() => { drained = true })
+      await Promise.resolve()
+      expect(drained).toBe(false)
+    }
+    await aborted.promise
+  } finally {
+    release.resolve(); socket?.destroy()
+    await refreshing; await (stopped ?? server.stop())
+  }
+  expect(store.state.drafts).toEqual({})
+  expect(store.state.active?.session_id).toBe("session_demo_1")
+})

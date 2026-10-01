@@ -185,3 +185,20 @@ test("a superseded navigation failure cannot overwrite the current status", asyn
   expect(store.state.error).toBe("")
   expect(store.state.conversationLoading).toBe(false)
 })
+
+test("a failed obsolete search cannot overwrite a newer search's state", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const list = client.list, old = Promise.withResolvers<never>()
+  client.list = (page, query) => query === "old" ? old.promise : list(page, query)
+  const previous = store.perform(() => store.list("old"))
+  await store.list("Customer B")
+  old.reject(new Error("obsolete failure")); await previous
+  expect(store.state.query).toBe("Customer B")
+  expect(store.state.conversations.map(c => c.session_id)).toEqual(["session_demo_2"])
+  expect(store.state.error).toBe("")
+  expect(store.state.loading).toBe(false)
+  client.list = async () => { throw new Error("current failure") }
+  await store.perform(() => store.list("current"))
+  expect(store.state.error).toBe("current failure")
+})

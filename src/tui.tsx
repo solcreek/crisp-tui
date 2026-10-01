@@ -23,6 +23,7 @@ export async function startTui(store: Store, path: string, pollMs: number, creat
     renderer = await createRenderer({ onDestroy: () => { void stop().catch(() => {}) }, exitOnCtrlC: true })
     await render(() => <App store={store} bindFocus={fn => { focus = fn }} />, renderer)
     if (!stopping) stopUpdates = startUpdates(store, pollMs)
+    return { stop: () => { renderer?.destroy(); return stop() } }
   } catch (error) {
     renderer?.destroy()
     await stop()

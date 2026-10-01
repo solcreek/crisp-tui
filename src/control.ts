@@ -2,6 +2,7 @@ import { createConnection, createServer, type Socket } from "node:net"
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createHash } from "node:crypto"
+import type { CommandContext } from "./commands"
 export { controller } from "./commands"
 
 const LIMIT = 1_048_576
@@ -18,9 +19,10 @@ export function request(path: string, method: string, params: unknown = {}, time
       clearTimeout(timer); socket.destroy()
       error ? reject(error) : resolve(value)
     }
+    const deadline = Date.now() + timeout
     const timer = setTimeout(() => finish(new Error("TUI control request timed out")), timeout)
     socket.setEncoding("utf8")
-    socket.on("connect", () => socket.write(JSON.stringify({ id: 1, method, params }) + "\n"))
+    socket.on("connect", () => socket.write(JSON.stringify({ id: 1, method, params, deadline }) + "\n"))
     socket.on("error", (e: NodeJS.ErrnoException) => finish(e.code === "ENOENT" || e.code === "ECONNREFUSED" ? new NotRunning("No TUI running for this profile/socket") : e))
     socket.on("end", () => finish(new Error("TUI closed the connection")))
     socket.on("data", chunk => {
@@ -36,7 +38,7 @@ export function request(path: string, method: string, params: unknown = {}, time
   })
 }
 
-export async function serve(path: string, handle: (method: string, params: Record<string, unknown>) => unknown) {
+export async function serve(path: string, handle: (method: string, params: Record<string, unknown>, context: CommandContext) => unknown) {
   const parent = dirname(path)
   await mkdir(parent, { recursive: true, mode: 0o700 })
   const info = await lstat(parent)
@@ -56,10 +58,14 @@ export async function serve(path: string, handle: (method: string, params: Recor
     await unlink(path)
   } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e }
 
-  const sockets = new Set<Socket>()
+  const sockets = new Map<Socket, AbortController>()
+  const tasks = new Set<Promise<void>>()
   const server = createServer(socket => {
-    sockets.add(socket)
-    socket.on("close", () => sockets.delete(socket))
+    const cancellation = new AbortController()
+    sockets.set(socket, cancellation)
+    const cancel = () => cancellation.abort(new Error("Control request cancelled"))
+    socket.on("end", cancel)
+    socket.on("close", () => { cancel(); sockets.delete(socket) })
     socket.on("error", () => socket.destroy())
     socket.setEncoding("utf8")
     socket.setTimeout(75_000, () => socket.destroy())
@@ -72,20 +78,26 @@ export async function serve(path: string, handle: (method: string, params: Recor
       const end = buffer.indexOf("\n")
       if (end < 0) return
       received = true // one request per connection; net.Socket handles write backpressure
-      void (async () => {
+      const task = (async () => {
         let id: unknown = null
+        let timer: ReturnType<typeof setTimeout> | undefined
         try {
           const input = JSON.parse(buffer.slice(0, end))
           if (!input || typeof input.method !== "string" || !Number.isSafeInteger(input.id)) throw new Error("Invalid request")
           id = input.id
           const params = input.params ?? {}
           if (typeof params !== "object" || Array.isArray(params)) throw new Error("Invalid params")
-          const result = await handle(input.method, params)
+          if (input.deadline !== undefined && !Number.isSafeInteger(input.deadline)) throw new Error("Invalid deadline")
+          const deadline = Math.min(input.deadline ?? Infinity, Date.now() + 70_000)
+          timer = setTimeout(cancel, Math.max(0, deadline - Date.now()))
+          const result = await handle(input.method, params, { signal: cancellation.signal, deadline })
           socket.end(JSON.stringify({ id, ok: true, result: result ?? null }) + "\n")
         } catch (e) {
           socket.end(JSON.stringify({ id, ok: false, error: e instanceof Error ? e.message : "Control error" }) + "\n")
-        }
+        } finally { clearTimeout(timer) }
       })()
+      tasks.add(task)
+      void task.finally(() => tasks.delete(task))
     })
   })
   await new Promise<void>((resolve, reject) => {
@@ -93,10 +105,14 @@ export async function serve(path: string, handle: (method: string, params: Recor
     server.listen(path, () => { server.off("error", reject); resolve() })
   })
   await chmod(path, 0o600)
-  return { async stop() {
-    for (const socket of sockets) socket.destroy()
-    await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()))
-    await unlink(path).catch(() => {})
+  let stopping: Promise<void> | undefined
+  return { stop() {
+    return stopping ??= (async () => {
+      for (const [socket, cancellation] of sockets) { cancellation.abort(new Error("TUI is stopping")); socket.destroy() }
+      await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()))
+      await Promise.allSettled([...tasks])
+      await unlink(path).catch(() => {})
+    })()
   } }
 }
 

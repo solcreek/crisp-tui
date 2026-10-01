@@ -55,3 +55,49 @@ test("queued commands retain their validated arguments and recover after failure
   await handle("goto", { session: "session_demo_3" })
   expect(store.state.active?.session_id).toBe("session_demo_3")
 })
+
+test("expired and cancelled queued actions never change navigation or drafts", async () => {
+  const client = demoClient(), store = new Store(client), handle = controller(store)
+  await store.refresh()
+  const list = client.list, started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  client.list = async (...args) => { started.resolve(); await release.promise; return list(...args) }
+  const refresh = handle("refresh", {})
+  await started.promise
+  const cancellation = new AbortController()
+  const draft = handle("draft", { session: "session_demo_2", text: "cancelled" }, { signal: cancellation.signal })
+  cancellation.abort(new Error("disconnected"))
+  release.resolve(); await refresh
+  await expect(draft).rejects.toThrow("disconnected")
+  await expect(handle("goto", { session: "session_demo_2" }, { deadline: Date.now() - 1 })).rejects.toThrow("expired")
+  expect(store.state.active?.session_id).toBe("session_demo_1")
+  expect(store.state.drafts).toEqual({})
+  await handle("goto", { session: "session_demo_3" })
+  expect(store.state.active?.session_id).toBe("session_demo_3")
+})
+
+test("cancelling a draft during its conversation read prevents composing or focus", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const get = client.get, started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  client.get = async id => { started.resolve(); await release.promise; return get(id) }
+  let focused = false
+  const handle = controller(store, () => { focused = true }), cancellation = new AbortController()
+  const draft = handle("draft", { session: "session_demo_2", text: "cancelled" }, { signal: cancellation.signal })
+  await started.promise
+  cancellation.abort(new Error("disconnected")); release.resolve()
+  await expect(draft).rejects.toThrow("disconnected")
+  expect(store.state.drafts).toEqual({})
+  expect(focused).toBe(false)
+})
+
+test("control queue is bounded while snapshots remain available", async () => {
+  const client = demoClient(), store = new Store(client), handle = controller(store)
+  const list = client.list, release = Promise.withResolvers<void>()
+  client.list = async (...args) => { await release.promise; return list(...args) }
+  const pending = Array.from({ length: 64 }, () => handle("refresh", {}))
+  try {
+    await expect(handle("goto", { session: "session_demo_2" })).rejects.toThrow("queue is full")
+    expect(await handle("state", {})).toHaveProperty("protocol", 1)
+  } finally { release.resolve(); await Promise.all(pending) }
+  await handle("goto", { session: "session_demo_2" })
+})

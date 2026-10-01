@@ -44,6 +44,8 @@ export class Store {
         this.update({ conversations })
         return
       }
+    } catch (error) {
+      if (version === this.listing) throw error
     } finally { if (version === this.listing) this.update({ loading: false }) }
   }
   private async selectInitialConversation() {
