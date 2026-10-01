@@ -23,19 +23,16 @@ Requires Node.js 20 or newer on macOS or Linux (glibc), on arm64 or x64.
 executable, including the Bun runtime and OpenTUI renderer, automatically.
 Windows and musl/Alpine are not currently supported.
 
-This distribution targets v0.2.0. Until it is published, npm's v0.1.0 still
-requires a separate Bun installation.
-
 Try the demo without a global installation:
 
 ```sh
-npx crisp-tui@0.2.0 --demo
+npx crisp-tui --demo
 ```
 
 Or install the command:
 
 ```sh
-npm install -g crisp-tui@0.2.0
+npm install -g crisp-tui
 crisp-tui --demo
 ```
 
