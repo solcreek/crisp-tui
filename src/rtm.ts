@@ -1,10 +1,12 @@
 import { type Cleanup, type RealtimeSubscribe } from "./types"
 import type { Store } from "./store"
 import { systemClock, type Clock } from "./scheduling"
+import { metrics } from "./performance"
 
 /** crispctl owns discovery, Socket.IO, authentication and reconnect policy. */
 export function listen(prefix: string[], flags: string[], env = process.env): RealtimeSubscribe {
   return (onEvent, onStatus) => {
+    let authenticated = metrics.start("rtm.authenticate")
     let stopped = false
     let failed = false
     let forceKill: ReturnType<typeof setTimeout> | undefined
@@ -30,7 +32,11 @@ export function listen(prefix: string[], flags: string[], env = process.env): Re
       if (stopped || !line.trim()) return
       const item = JSON.parse(line)
       if (status) {
-        if (item.status === "authenticated" || item.status === "reconnecting") onStatus({ state: item.status })
+        if (item.status === "authenticated" || item.status === "reconnecting") {
+          if (item.status === "authenticated") authenticated()
+          else authenticated = metrics.start("rtm.authenticate")
+          onStatus({ state: item.status })
+        }
         else if (item.ok === false) error("crispctl RTM reported an error; check token access and configuration")
       } else if (typeof item.event === "string" && item.data && typeof item.data === "object" && !Array.isArray(item.data)) {
         onEvent({ event: item.event, data: item.data, received_at: item.received_at })

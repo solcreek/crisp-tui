@@ -11,7 +11,7 @@ export function controlState(store: Store) {
   const s = store.state, draft = store.draft()
   // Protocol 2 is deliberately independent of internal State and never embeds histories or draft text.
   return { protocol: 2, revision: s.revision, source: preview(s.source), readOnly: s.readOnly,
-    selectedSession: s.selectedSession, conversationLoading: s.conversationLoading,
+    selectedSession: s.selectedSession, conversationLoading: s.conversationLoading, conversationCached: s.conversationCached,
     active: s.active ? conversation(s.active) : null, realtime: s.realtime,
     query: preview(s.query), page: s.page, loading: s.loading, sending: s.sending,
     counts: { conversations: s.conversations.length, messages: s.messages.length, drafts: Object.keys(s.drafts).length },

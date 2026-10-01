@@ -1,4 +1,5 @@
 import { loadLayout } from "./layout"
+import { metrics } from "./performance"
 import { parseArgs } from "node:util"
 import { command, createClient, runner, CliError } from "./crispctl"
 import { demoClient } from "./demo"
@@ -22,6 +23,7 @@ TUI: Ctrl+B toggles details; Tab cycles panes; / searches; Ctrl+N toggles reply/
 Global control/TUI options: --profile, --website. --poll SECONDS (default 60;
 0 disables polling; minimum 30). CRISPCTL_BIN selects the crispctl executable.
 Agent drafts are never sent automatically. Direct writes use 'cli reply ...'.
+Set CRISP_TUI_PERF=1 before launch; 'ctl perf' reports bounded, content-free timings.
 --read-only disables TUI replies, notes, state changes, mark-read and agent drafts.
 Exit codes: 0 success, 1 operation error, 2 usage, 3 no running TUI.
 `
@@ -63,20 +65,22 @@ export async function main(args: string[]) {
   }
   if ((mode && mode !== "tui") || verb || rest.length || opts.note || opts.replace || opts.offset !== undefined || opts.limit !== undefined || opts.revision !== undefined) throw new CliError("Unknown command or option. Use --help; API commands go after 'cli'.", 2)
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new CliError("The TUI needs an interactive terminal. Use ctl or cli for agent workflows.", 2)
-  const layout = await loadLayout(opts.config)
+  const layout = await metrics.measure("startup.layout", () => loadLayout(opts.config))
   const readOnly = opts["read-only"] || process.env.CRISPCTL_READ_ONLY === "1"
-  let client
-  if (opts.demo) client = demoClient()
-  else {
+  const loadClient = async () => {
+    if (opts.demo) return demoClient()
     const flags = ["--profile", opts.profile, ...(opts.website ? ["--website", opts.website] : []), ...(readOnly ? ["--read-only"] : [])]
     const prefix = command()
     const run = runner(prefix, flags)
-    const auth = await run(["auth", "show"]) as { tier?: string; key?: string; identifier?: string; website_id?: string }
+    const auth = await metrics.measure("startup.auth", () => run(["auth", "show"])) as { tier?: string; key?: string; identifier?: string; website_id?: string }
     if (auth.tier !== "website") throw new Error("Configure crispctl with --tier website. This TUI uses website tokens.")
     if (auth.key !== "set" || !auth.identifier || !auth.website_id) throw new Error("Incomplete crispctl website credentials. See README.md.")
-    client = createClient(run, `${opts.profile} · website ${auth.website_id}`, listen(prefix, flags))
+    return createClient(run, `${opts.profile} · website ${auth.website_id}`, listen(prefix, flags))
   }
-  await (await import("./tui")).startTui(new Store(readOnly ? readOnlyClient(client) : client), path, opts.poll * 1000, undefined, layout)
+  const [client, { startTui }] = await Promise.all([
+    loadClient(), metrics.measure("startup.ui_import", () => import("./tui")),
+  ])
+  await startTui(new Store(readOnly ? readOnlyClient(client) : client), path, opts.poll * 1000, undefined, layout)
   return 0
 }
 export function exitCode(error: unknown) { return error instanceof NotRunning ? 3 : error instanceof CliError ? error.code : 1 }

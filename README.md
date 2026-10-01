@@ -156,12 +156,79 @@ checkout. The last option requires Node. A compiled TUI should use PATH or
 `CRISPCTL_BIN`. Credentials stay in the subprocess environment/config; commands
 are spawned as argument arrays, never shell strings.
 
+## Performance measurement
+
+Enable bounded, in-memory diagnostics when launching the TUI:
+
+```sh
+CRISP_TUI_PERF=1 bun run dev --demo
+# In another terminal, using the same profile/socket:
+bun run src/index.ts ctl perf
+```
+
+The environment flag also works with installed `crisp-tui` and `live`. `ctl perf`
+is read-only and performs no API requests. Diagnostics are disabled by default.
+Only fixed metric names, durations, counts and failure counts are retained; no
+credentials, session IDs, paths, message content or error text are included.
+
+| Metrics | What they measure |
+| --- | --- |
+| `startup.*` | Entry point, config, credentials/auth, UI import, socket, renderer, mount, first frame and first loaded frame |
+| `client.list/get/messages` | Complete read latency through crispctl, including subprocess startup and network |
+| `subprocess.*`, `crispctl.parse` | Spawn, first stdout/stderr byte, completion and JSON parsing |
+| `state.*`, `cache.*`, `details.project` | Data reconciliation, synchronous UI notifications, snapshot access and sidebar projection |
+| `navigation.*` | Selection to feedback frame, cached/cold content frame and freshly loaded frame |
+| `render.*` | JS frame work, native rendering, backend output timing and state change to frame completion |
+| `rtm.authenticate` | Listener startup/reconnect to authenticated status |
+
+All durations are milliseconds. Counts, mean and max cover the process lifetime;
+p50/p95 use the most recent 256 samples per metric. Startup frame milestones use
+runtime uptime. Concurrent stages overlap, so their durations must not be summed.
+Frame completion measures application output, not when Ghostty/the compositor
+physically displays it. Native output timings may be unavailable and are omitted;
+idle time between frames is not render work. Credentials timing includes any
+1Password unlock wait. DNS/TLS/server time remains inside crispctl's total read
+latency; this TUI does not pretend to measure those separately.
+
+For repeatable synthetic measurements:
+
+```sh
+bun run build
+bun run benchmark --runs 5 --check > /tmp/crisp-performance.json
+```
+
+This measures source and native-binary startup externally through a PTY, then
+mount/unchanged refresh/draft editing with 100 and 1,000 synthetic messages at
+160 × 50 terminal cells. It never loads Crisp credentials or contacts Crisp.
+Headless render scenarios measure application work; they exclude a desktop
+terminal/compositor. Startup measurements include process launch, but not npm
+installation/download time. Reports include sample counts, p50/p95/max and the
+last startup's stage breakdown. Compare the same machine, build and dimensions;
+small samples and newly rebuilt executables can have substantial outliers.
+
+CI runs the benchmark on all four platforms, uploads `performance-<platform>`
+JSON artifacts, and checks generous regression limits in
+[`scripts/performance-budgets.json`](scripts/performance-budgets.json). These are
+initial regression guardrails, not latency guarantees for live API calls.
+Check mode fails if a configured metric is missing or exceeds its budget. Render
+failures exit nonzero, preserve the partial JSON report on stdout, and print the
+error on stderr.
+
 ## Human workflow
 
 The inbox supports paged conversations, server-side search, messages, text and
 file-link display, replies, internal notes, resolve/reopen and explicit mark read.
 Opening or polling a conversation does not mark it read. Drafts and reply/note
 mode are kept separately for each conversation during this process.
+
+Revisiting a conversation immediately displays its saved in-memory snapshot while
+fresh details and messages load in parallel. The header labels the saved copy
+until revalidation succeeds; a failed update keeps that copy visible and reports
+the error. Ctrl+R retries. First visits show the selected conversation's name and
+a loading indicator immediately. The per-session cache holds at most twenty
+conversations and 8 MiB of serialized data, evicts the least recently viewed
+entries, and is never written to disk. Acknowledged writes invalidate the affected
+snapshot. Repeated selections while the same conversation loads share its request.
 
 | Key | Action |
 | --- | --- |
@@ -254,6 +321,7 @@ The control commands work against the running TUI:
 
 ```sh
 bun run src/index.ts ctl state
+bun run src/index.ts ctl perf
 bun run src/index.ts ctl details
 bun run src/index.ts ctl conversations
 bun run src/index.ts ctl messages --offset 0 --limit 20
@@ -275,7 +343,8 @@ values and truncation flags. It is read-only and makes no API requests; pass
 
 Control protocol **v2** returns a compact `state`: source, page/query, selected
 session, active conversation summary, loading/sending flags, counts, current draft
-length/note mode, error source and status. It does not embed message histories or
+length/note mode, error source and status. `conversationCached` identifies a saved
+snapshot awaiting successful revalidation. It does not embed message histories or
 all draft text. `goto` and `refresh` return the same compact state. `draft` returns
 `{session, draft: {note, length}, revision, sent: false}` without echoing the text.
 

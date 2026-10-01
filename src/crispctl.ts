@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Conversation, CrispClient, Message, RealtimeSubscribe } from "./types"
 import { capture } from "./subprocess"
+import { metrics } from "./performance"
 
 export function command(env = process.env): string[] {
   if (env.CRISPCTL_BIN) return [env.CRISPCTL_BIN]
@@ -33,7 +34,7 @@ export function runner(prefix: string[], global: string[] = [], env = process.en
       } catch {}
       throw new CliError(message, code || 1)
     }
-    try { return JSON.parse(stdout) } catch { throw new CliError("crispctl returned invalid JSON") }
+    try { return metrics.sync("crispctl.parse", () => JSON.parse(stdout)) } catch { throw new CliError("crispctl returned invalid JSON") }
   }
 }
 function array<T>(value: unknown, key: string): T[] {

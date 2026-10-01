@@ -17,6 +17,7 @@ const pageFields = { offset: "integer", limit: "integer", revision: "integer" } 
 
 /** CLI syntax, socket validation, permissions and execution share this registry. */
 export const commands: Readonly<Record<string, Command>> = {
+  perf: { fields: {}, mode: "snapshot", allowedInReadOnly: true, output: "json", execute: store => store.metrics.snapshot() },
   details: { fields: {}, mode: "snapshot", allowedInReadOnly: true, output: "json", execute: (store, _params, _focus, _check, layout) => ({
     revision: store.state.revision, session: store.state.active?.session_id ?? null,
     sections: conversationDetails(store.state.active, layout.sidebar),

@@ -1,4 +1,5 @@
 import { loadLayout } from "./layout"
+import { metrics } from "./performance"
 import { parseArgs } from "node:util"
 import { loadWebsiteCredentials } from "./onepassword"
 import { credentialClient } from "./session"
@@ -20,8 +21,11 @@ export async function liveReadonlyMain(args: string[], readCredentials = loadWeb
       if (!values.item?.trim()) throw new Error("Choose a 1Password item explicitly with --item ITEM")
       const timeout = values["rtm-timeout"] === undefined ? 0 : Number(values["rtm-timeout"])
       if (values["rtm-timeout"] !== undefined && (!values.check || !Number.isInteger(timeout) || timeout < 1 || timeout > 120)) throw new Error("--rtm-timeout requires check mode and 1–120 seconds")
-      const layout = await loadLayout(values.config)
-      const credentials = await readCredentials(values.item, values.website)
+      const layout = await metrics.measure("startup.layout", () => loadLayout(values.config))
+      const [credentials, tui] = await Promise.all([
+        readCredentials(values.item, values.website),
+        values.check ? Promise.resolve(undefined) : metrics.measure("startup.ui_import", () => import("./tui")),
+      ])
       const websiteId = credentials.websiteId
       const session = credentialClient(credentials)
       const store = new Store(session.client)
@@ -50,8 +54,7 @@ export async function liveReadonlyMain(args: string[], readCredentials = loadWeb
         }, null, 2))
       } else {
         if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Run in an interactive terminal, or use live:check for a read-only connection test")
-        const { startTui } = await import("./tui")
-        await startTui(store, socketPath("onepassword-readonly", websiteId), 0, undefined, layout)
+        await tui!.startTui(store, socketPath("onepassword-readonly", websiteId), 0, undefined, layout)
       }
     } catch (error) {
       console.error(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Read-only check failed" }))

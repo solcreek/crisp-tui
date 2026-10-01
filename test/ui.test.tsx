@@ -146,6 +146,45 @@ test("details follow selection, toggle without losing drafts, and adapt to termi
   await frame("Preserve this draft", "Team")
 })
 
+test("cached conversation and sidebar render while the network request is still pending", async () => {
+  const client = demoClient(), store = new Store(client), get = client.get
+  await store.refresh(); store.setDraft("Preserved reply")
+  await store.open("session_demo_2")
+  const wait = Promise.withResolvers<void>()
+  client.get = async id => { await wait.promise; return get(id) }
+  ui = await testRender(() => <App store={store} />, { width: 140, height: 50 })
+  const opening = store.open("session_demo_1")
+  try {
+    await frame("saved copy", "updating…", "Preserved reply", "Portland", "Can you help me find my invoice?")
+    expect(store.state.conversationLoading).toBe(true)
+    expect(ui.captureCharFrame()).not.toContain("Loading messages…")
+  } finally { wait.resolve(); await opening }
+  await frame("Opened Demo Customer A")
+  expect(ui.captureCharFrame()).not.toContain("saved copy")
+})
+
+test("cold navigation shows the selected header immediately and cannot steal focus after loading", async () => {
+  const client = demoClient(), store = new Store(client), get = client.get
+  await store.refresh()
+  const wait = Promise.withResolvers<void>()
+  client.get = async id => { await wait.promise; return get(id) }
+  ui = await testRender(() => <App store={store} />, { width: 140, height: 40 })
+  ui.mockInput.pressArrow("down"); ui.mockInput.pressEnter()
+  try {
+    await frame("Demo Customer B  ·  unresolved", "Loading messages…", "Loading details…")
+    expect(store.state.selectedSession).toBe("session_demo_2")
+    expect(ui.captureCharFrame()).not.toContain("Choose a conversation")
+    ui.mockInput.pressEscape(); await Bun.sleep(50)
+    ui.mockInput.pressKey("/")
+    await frame("Search · Enter to submit")
+  } finally { wait.resolve() }
+  await frame("Opened Demo Customer B")
+  await ui.mockInput.typeText("Customer A")
+  ui.mockInput.pressEnter()
+  await frame("Search: Customer A")
+  expect(store.state.query).toBe("Customer A")
+})
+
 test("custom details show chosen fields and clear old values while navigation loads", async () => {
   const { parseLayout } = await import("../src/layout")
   const client = demoClient(), store = new Store(client)

@@ -43,6 +43,16 @@ jobs:
       - run: bun run build
       - run: bun run test:coverage
       - run: bun run test:package
+      - name: Measure demo startup and rendering
+        run: |
+          mkdir -p reports
+          bun run benchmark --check > reports/performance.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: performance-${{ matrix.platform }}
+          path: reports/performance.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         if: always()
         with:

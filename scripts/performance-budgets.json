@@ -1,0 +1,12 @@
+{
+  "source.first_output": 2500,
+  "source.first_content": 5000,
+  "binary.first_output": 2500,
+  "binary.first_content": 5000,
+  "render.100.mount": 500,
+  "render.100.unchanged_refresh": 200,
+  "render.100.draft": 100,
+  "render.1000.mount": 2500,
+  "render.1000.unchanged_refresh": 1000,
+  "render.1000.draft": 250
+}
