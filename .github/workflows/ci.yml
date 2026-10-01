@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -32,9 +33,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+          no-cache: true
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run build

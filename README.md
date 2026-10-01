@@ -313,16 +313,38 @@ All five package versions must match. `bun run build:package` compiles and stage
 the host platform under `packages/<os>-<arch>/bin/`. `bun run test:package` produces
 verified tarballs in `dist/npm/`. CI uploads them as `npm-<os>-<arch>` artifacts.
 
-Use artifacts from one successful CI run for the release commit. Publish all four
-platform packages first, then the main package, so new npx installs can always
-find their binary. This requires npm publisher credentials; CI does not publish.
+Tag releases use `.github/workflows/publish.yml` and npm trusted publishing
+(OIDC); no npm token is stored in GitHub. The workflow checks the tag against
+`package.json`, runs the complete four-platform CI without restored caches, and
+publishes its verified artifacts. Platform packages must become publicly
+available before the launcher is published. Registry integrity checks prevent
+overwriting or silently accepting an unrelated existing version.
+
+Configure each package once with npm 11.15.0 or newer, a logged-in maintainer
+account and 2FA:
+
+```sh
+for package in crisp-tui crisp-tui-darwin-arm64 crisp-tui-darwin-x64 crisp-tui-linux-arm64 crisp-tui-linux-x64; do
+  npm trust github "$package" --repo solcreek/crisp-tui --file publish.yml --allow-publish --yes
+done
+```
+
+For a release, update all five versions and the root optional dependencies,
+refresh `bun.lock`, commit, then push a matching `vX.Y.Z` tag. Prereleases use the
+`next` npm tag; stable releases use `latest`. A manual workflow run performs a
+full build and publication dry run without publishing:
+
+```sh
+gh workflow run publish.yml
+```
+
+For a manual recovery, download artifacts from the original successful release
+run and use the same publisher locally with npm authentication:
 
 ```sh
 gh run download RUN_ID --pattern 'npm-*' --dir release-artifacts
-for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
-  npm publish "release-artifacts/npm-$platform/crisp-tui-$platform-0.2.0.tgz" --access public
-done
-npm publish release-artifacts/npm-darwin-arm64/crisp-tui-0.2.0.tgz --access public
+node scripts/publish.mjs release-artifacts --dry-run
+node scripts/publish.mjs release-artifacts
 ```
 
 Do not publish platform packages directly from an unbuilt workspace. The root

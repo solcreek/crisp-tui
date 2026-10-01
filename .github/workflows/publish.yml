@@ -1,0 +1,58 @@
+name: Publish Package
+
+on:
+  push:
+    tags: ['v*']
+  # Manual runs build and validate all packages without publishing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Check release tag
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node --input-type=module -e 'import assert from "node:assert/strict"; import pkg from "./package.json" with { type:"json" }; assert.equal(process.env.RELEASE_TAG, "v" + pkg.version)'
+
+  build:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: npm-*
+          path: release-artifacts
+      - name: Validate publication (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        run: node scripts/publish.mjs release-artifacts --dry-run
+      - name: Publish platform packages, then launcher using OIDC
+        if: github.event_name == 'push'
+        run: node scripts/publish.mjs release-artifacts
