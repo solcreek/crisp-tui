@@ -120,3 +120,68 @@ describe("shared human / agent state", () => {
     expect(store.state.messages.at(-1)?.content).toBe("new reply")
   })
 })
+
+test("first refresh reads a conversation only once", async () => {
+  const client = demoClient(), calls: string[] = []
+  const list = client.list, get = client.get, messages = client.messages
+  client.list = (...args) => { calls.push("list"); return list(...args) }
+  client.get = id => { calls.push("get"); return get(id) }
+  client.messages = id => { calls.push("messages"); return messages(id) }
+  await new Store(client).refresh()
+  expect(calls).toEqual(["list", "get", "messages"])
+})
+
+test("a list arriving during navigation preserves the selected conversation", async () => {
+  const client = demoClient(), list = client.list, get = client.get
+  const listed = Promise.withResolvers<void>(), releaseList = Promise.withResolvers<void>()
+  const opened = Promise.withResolvers<void>(), releaseOpen = Promise.withResolvers<void>()
+  client.list = async (...args) => { const rows = await list(...args); listed.resolve(); await releaseList.promise; return rows }
+  client.get = async id => { if (id === second) { opened.resolve(); await releaseOpen.promise }; return get(id) }
+  const store = new Store(client), refreshing = store.refresh()
+  await listed.promise
+  const opening = store.open(second)
+  await opened.promise
+  expect(store.snapshot()).toMatchObject({ selectedSession: second, conversationLoading: true })
+  releaseList.resolve(); await refreshing
+  expect(store.state.selectedSession).toBe(second)
+  releaseOpen.resolve(); await opening
+  expect(store.state.active?.session_id).toBe(second)
+  expect(store.state.conversationLoading).toBe(false)
+})
+
+for (const action of ["resolve", "read"] as const) test(`a list requested before ${action} cannot restore stale data`, async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const list = client.list, started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  let reads = 0
+  client.list = async (...args) => {
+    const rows = await list(...args)
+    if (++reads === 1) { started.resolve(); await release.promise }
+    return rows
+  }
+  const refreshing = store.refresh()
+  await started.promise
+  if (action === "resolve") await store.changeState()
+  else await store.markRead()
+  release.resolve(); await refreshing
+  expect(reads).toBe(2)
+  const row = store.state.conversations.find(c => c.session_id === first)!
+  if (action === "resolve") {
+    expect(row.state).toBe("resolved")
+    expect(store.state.active?.state).toBe("resolved")
+  } else {
+    expect(row.unread?.operator).toBe(0)
+    expect(store.state.active?.unread?.operator).toBe(0)
+  }
+})
+
+test("a superseded navigation failure cannot overwrite the current status", async () => {
+  const client = demoClient(), get = client.get, release = Promise.withResolvers<void>()
+  client.get = async id => { if (id === first) { await release.promise; throw new Error("old failure") }; return get(id) }
+  const store = new Store(client), old = store.perform(() => store.open(first))
+  await store.open(second)
+  release.resolve(); await old
+  expect(store.state.active?.session_id).toBe(second)
+  expect(store.state.error).toBe("")
+  expect(store.state.conversationLoading).toBe(false)
+})
