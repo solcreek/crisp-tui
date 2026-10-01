@@ -6,7 +6,7 @@ import type { Cleanup } from "./types"
 import { App } from "./ui/App"
 import { startUpdates } from "./updates"
 
-export async function startTui(store: Store, path: string, pollMs: number) {
+export async function startTui(store: Store, path: string, pollMs: number, createRenderer = createCliRenderer) {
   let focus = () => {}
   const control = await serve(path, controller(store, () => focus()))
   let stopUpdates: Cleanup = () => {}
@@ -20,7 +20,7 @@ export async function startTui(store: Store, path: string, pollMs: number) {
     return stopping
   }
   try {
-    renderer = await createCliRenderer({ onDestroy: () => { void stop().catch(() => {}) }, exitOnCtrlC: true })
+    renderer = await createRenderer({ onDestroy: () => { void stop().catch(() => {}) }, exitOnCtrlC: true })
     await render(() => <App store={store} bindFocus={fn => { focus = fn }} />, renderer)
     if (!stopping) stopUpdates = startUpdates(store, pollMs)
   } catch (error) {
