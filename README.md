@@ -210,6 +210,9 @@ CI runs the benchmark on all four platforms, uploads `performance-<platform>`
 JSON artifacts, and checks generous regression limits in
 [`scripts/performance-budgets.json`](scripts/performance-budgets.json). These are
 initial regression guardrails, not latency guarantees for live API calls.
+Check mode fails if a configured metric is missing or exceeds its budget. Render
+failures exit nonzero, preserve the partial JSON report on stdout, and print the
+error on stderr.
 
 ## Human workflow
 

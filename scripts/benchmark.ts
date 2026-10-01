@@ -54,7 +54,10 @@ for (const [name, argv] of [["source", [process.execPath, join(root, "src/index.
 }
 const { benchmarkRender } = await import("./benchmark-render")
 let renderFailed = false
-try { await benchmarkRender(runs, record) } catch { renderFailed = true }
+try { await benchmarkRender(runs, record) } catch (error) {
+  renderFailed = true
+  console.error("Render benchmark failed:", error)
+}
 const summary = Object.fromEntries(Object.entries(measurements).map(([name, values]) => {
   const sorted = [...values].sort((a, b) => a - b)
   const round = (n: number) => Math.round(n * 100) / 100
@@ -62,7 +65,8 @@ const summary = Object.fromEntries(Object.entries(measurements).map(([name, valu
     p95Ms: round(sorted[Math.ceil(sorted.length * 0.95) - 1]!), maxMs: round(sorted.at(-1)!) }]
 }))
 const budgets = await Bun.file(join(import.meta.dir, "performance-budgets.json")).json() as Record<string, number>
+const missingMetrics = Object.keys(budgets).filter(name => !summary[name])
 const violations = Object.entries(budgets).filter(([key, max]) => summary[key] && summary[key]!.p95Ms > max).map(([name, limitMs]) => ({ name, limitMs, p95Ms: summary[name]!.p95Ms }))
 console.log(JSON.stringify({ schema: 1, runtime: { platform: process.platform, arch: process.arch, bun: Bun.version },
-  runs, terminal: { columns: 160, rows: 50 }, synthetic: true, summary, budgets, violations, renderFailed, lastStartupMetrics: childMetrics }, null, 2))
-if (renderFailed || (values.check && violations.length)) process.exitCode = 1
+  runs, terminal: { columns: 160, rows: 50 }, synthetic: true, summary, budgets, violations, missingMetrics, renderFailed, lastStartupMetrics: childMetrics }, null, 2))
+if (renderFailed || (values.check && (violations.length || missingMetrics.length))) process.exitCode = 1
