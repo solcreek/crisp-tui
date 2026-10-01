@@ -16,8 +16,13 @@ async function run(argv: string[], cwd = root, extra: NodeJS.ProcessEnv = {}) {
   return out
 }
 async function pack(workspace?: string) {
-  const [artifact] = JSON.parse(await run([npm, "pack", "--ignore-scripts", "--json", "--pack-destination", scratch,
-    ...(workspace ? ["--workspace", workspace] : ["--workspaces=false"])])) as { filename: string; files: { path: string }[] }[]
+  const output = JSON.parse(await run([npm, "pack", "--ignore-scripts", "--json", "--pack-destination", scratch,
+    ...(workspace ? ["--workspace", workspace] : ["--workspaces=false"])]))
+  assert(output && typeof output === "object", "npm pack must return artifact metadata")
+  // npm 12 returns a package-name map; earlier versions return an array.
+  const artifacts = (Array.isArray(output) ? output : Object.values(output)) as { filename: string; files: { path: string }[] }[]
+  assert.equal(artifacts.length, 1, "npm pack must produce exactly one artifact")
+  const [artifact] = artifacts
   assert(artifact, "npm pack must produce an artifact")
   assert.deepEqual(artifact.files.map(file => file.path).sort(), workspace
     ? ["LICENSE", "README.md", "bin/crisp-tui", "package.json"]
