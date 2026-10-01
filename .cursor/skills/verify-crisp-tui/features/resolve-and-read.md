@@ -23,14 +23,14 @@ Preconditions:
 - The inbox pane is focused.
 
 - **Highlight a different row.** Press `j`. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys j`. Exit 0. `ctl state` still has `active.session_id` `session_demo_1`.
-- **Resolve the open conversation.** Press Ctrl+E. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys ctrl-e`, `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Conversation resolved'`, and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- 'Demo Customer A [resolved] session_demo_1'`. The screen text still contains `Demo Customer B [unresolved] session_demo_2`.
+- **Resolve the open conversation.** Press Ctrl+E. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys ctrl-e`, `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Conversation resolved'`, `bun .cursor/skills/verify-crisp-tui/harness.ts wait pty -- 'Conversation resolved'`, and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- 'Demo Customer A [resolved] session_demo_1'`. The screen text still contains `Demo Customer B [unresolved] session_demo_2`.
 - **Reopen it.** Press Ctrl+E again. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys ctrl-e`, `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Conversation reopened'`, and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- '> Demo Customer A [unresolved] session_demo_1'`.
-- **Mark it read.** Press Ctrl+U. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys ctrl-u` and `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Marked read'`. `ctl conversations` gives Demo Customer A `unread.operator` 0 and Demo Customer B `unread.operator` 2.
-- **Proof.** Run `bun .cursor/skills/verify-crisp-tui/harness.ts capture resolve-and-read --action "ctrl-e resolve, ctrl-e reopen, ctrl-u mark read"`. `resolve-and-read/screen.txt` contains `> Demo Customer A [unresolved] session_demo_1` and `Marked read`. `resolve-and-read/conversations.json` shows operator unread 0 for `session_demo_1` and 2 for `session_demo_2`.
+- **Mark it read.** Press Ctrl+U. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys ctrl-u`, `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Marked read'`, and `bun .cursor/skills/verify-crisp-tui/harness.ts wait pty -- 'Marked read'`. `ctl conversations` gives Demo Customer A `unread.operator` 0 and Demo Customer B `unread.operator` 2.
+- **Proof.** Run `bun .cursor/skills/verify-crisp-tui/harness.ts wait pty -- 'Marked read'`, then `bun .cursor/skills/verify-crisp-tui/harness.ts capture resolve-and-read --action "ctrl-e resolve, ctrl-e reopen, ctrl-u mark read"`. `resolve-and-read/screen.txt` contains `> Demo Customer A [unresolved] session_demo_1` and `Marked read`. `resolve-and-read/conversations.json` shows operator unread 0 for `session_demo_1` and 2 for `session_demo_2`.
 
 ## Gotchas
 
 - Ctrl+E and Ctrl+U ignore the highlight. `j` without Enter leaves Demo Customer A as the open conversation.
 - Opening a conversation does not mark it read. That check is in `open-conversation.md`.
-- The PTY log still contains the unread badge from earlier frames. Prove the current count with `ctl conversations`.
+- The raw PTY log still contains the unread badge from earlier frames. `wait pty` reads the current screen. Prove the current count with `ctl conversations`.
 - These keys are refused by a read-only TUI. Doctor requires `"readOnly":false` before this recipe.

@@ -14,7 +14,7 @@ Opening a conversation shows that customer's messages and leaves their unread co
 
 - Start the demo inbox. The first row is already open.
 - Press `j` or `k` in the inbox, then Enter, to open the highlighted row.
-- Click an inbox row. The helper cannot click, so keyboard Enter is the driven form of that path.
+- Click an inbox row. The helper cannot send a mouse event, so this entry point is not verified.
 - Run `ctl goto SESSION` against the running demo.
 - Press `]` for the next page and `[` for the previous page, from the inbox or messages pane.
 - Press Ctrl+R from any pane to refresh.
@@ -27,6 +27,7 @@ Preconditions:
 
 - **Startup row.** Read the loaded inbox. Run `bun .cursor/skills/verify-crisp-tui/harness.ts ctl -- screen` and `bun .cursor/skills/verify-crisp-tui/harness.ts ctl -- conversations`. Exit 0. The screen text contains `> Demo Customer A [unresolved] session_demo_1`, `Demo Customer B [unresolved] session_demo_2`, and `Demo Customer C [resolved] session_demo_3`. Conversations JSON gives Demo Customer A `unread.operator` 1 and Demo Customer B `unread.operator` 2.
 - **Highlight returns to the open row.** Press `j`, then `k`, then Enter, and type one character. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys j`, `bun .cursor/skills/verify-crisp-tui/harness.ts keys k`, `bun .cursor/skills/verify-crisp-tui/harness.ts keys enter`, `bun .cursor/skills/verify-crisp-tui/harness.ts keys type -- x`, and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- 'Reply draft: x'`. Exit 0. `ctl state` has `active.session_id` `session_demo_1` and `draft.text` `x`. `ctl conversations` still gives Demo Customer A `unread.operator` 1. Press backspace. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys backspace`. `ctl state` then has `draft.text` `""`.
+- **Click an inbox row.** Not verified. The helper has no mouse input. The unmet precondition is a pointer event on the inbox row. `keys enter` does not verify this path.
 - **Open the next row.** Return to the inbox, move down, and press Enter. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys esc`, `bun .cursor/skills/verify-crisp-tui/harness.ts keys j`, and `bun .cursor/skills/verify-crisp-tui/harness.ts keys enter`. Then run `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Opened Demo Customer B'` and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- '> Demo Customer B [unresolved] session_demo_2'`. Both exit 0. Conversations JSON still gives Demo Customer B `unread.operator` 2.
 - **Agent goto.** Open Demo Customer C. Run `bun .cursor/skills/verify-crisp-tui/harness.ts ctl -- goto session_demo_3`. Exit 0. Then run `bun .cursor/skills/verify-crisp-tui/harness.ts wait status -- 'Agent opened a conversation'` and `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- '> Demo Customer C [resolved] session_demo_3'`. Both exit 0.
 - **Next page.** Focus the inbox and press `]`. Run `bun .cursor/skills/verify-crisp-tui/harness.ts keys esc` and `bun .cursor/skills/verify-crisp-tui/harness.ts keys next`. Then run `bun .cursor/skills/verify-crisp-tui/harness.ts wait screen -- 'Inbox · page 2 · all'` and `bun .cursor/skills/verify-crisp-tui/harness.ts wait pty -- 'No conversations on this page.'`. `ctl conversations` is `[]`. The screen text still contains `Conversation: Demo Customer C (session_demo_3)`.
@@ -40,4 +41,4 @@ Preconditions:
 - `j` without Enter does not change the open conversation. Ctrl+E and Ctrl+U still act on the open row.
 - `ctl goto` does not focus the composer. A following `keys type` is not a composer edit unless the composer was already focused.
 - Page 2 of the demo has no rows. The previously open conversation stays open in the message pane.
-- The PTY log still contains `No conversations on this page.` after returning to page 1. Prove the current page with `ctl screen`.
+- The raw PTY log still contains `No conversations on this page.` after returning to page 1. `wait pty` reads the current screen. Prove the current page with `ctl screen`.

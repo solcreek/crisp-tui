@@ -22,7 +22,7 @@ Demo rows:
 - Treat every command as literal. Keep quoted text and flags unchanged.
 - Send keys only with `bun .cursor/skills/verify-crisp-tui/harness.ts keys`.
 - Send agent commands only with `bun .cursor/skills/verify-crisp-tui/harness.ts ctl --`.
-- Wait with `bun .cursor/skills/verify-crisp-tui/harness.ts wait`. The PTY log keeps old frames, so current state comes from `ctl`.
+- Wait with `bun .cursor/skills/verify-crisp-tui/harness.ts wait`. `pty` matches the current screen replayed from the log. `screen`, `status`, and `messages` read `ctl`.
 - Require the exit code and the observable text named in the recipe. A skipped entry point is not verified by a different path.
 - `ctl.jsonl` and `keys.jsonl` in the evidence directory record the actions. `capture` records the state after them.
 - Do not remove proof artifacts during cleanup.

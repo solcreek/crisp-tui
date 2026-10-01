@@ -25,7 +25,7 @@ One command starts a supervisor and the demo TUI:
 bun .cursor/skills/verify-crisp-tui/harness.ts launch
 ```
 
-Pass `--run <id>` or set `CRISP_TUI_VERIFY_RUN` to choose the id. Otherwise launch generates one. An id matches `^[a-z0-9][a-z0-9-]{0,39}$`. Launch refuses an id whose `/tmp/crisp-tui-verify/<id>` directory already exists. It also refuses an id whose evidence directory already has files, because cleanup leaves that directory in place and a second launch must not append to it.
+Pass `--run <id>` or set `CRISP_TUI_VERIFY_RUN` to choose the id. Otherwise launch generates one. An id matches `^[a-z0-9][a-z0-9-]{0,39}$`. Launch claims `/tmp/crisp-tui-verify/<id>` with an exclusive create and refuses the id when that directory already exists. The refused launch does not stop the run that owns the directory. Launch also refuses an id whose evidence directory already has files, because cleanup leaves that directory in place and a second launch must not append to it.
 
 Stdout is one JSON object. Require `"ok":true`, `"source":"DEMO · local only"`, and `"activeSession":"session_demo_1"`. Export the printed `runId`:
 
@@ -91,9 +91,9 @@ Send one `keys` command at a time and wait for its JSON `{"ok":true}` before the
 
 Verbs that exist: `state`, `screen`, `conversations`, `messages`, `refresh`, `goto SESSION`, `draft SESSION TEXT`, plus `--note` and `--replace` on `draft`. `state`, `screen`, `conversations`, and `messages` are snapshots of the loaded screen. `screen` is the semantic text view, not a pixel copy of the PTY. There is no `ctl` verb for send, search, resolve, or mark read. Those happen only through the keys above. `draft` focuses the composer and does not send.
 
-`wait` polls for 5 seconds. A `ctl` read that does not answer is killed when that deadline passes. `pty` reads the accumulated terminal log. `screen`, `status`, and `messages` read `ctl screen`, `state.status`, and `ctl messages`. Exit 0 is `{"ok":true,"via":...}`. Exit 1 means the text did not appear; the stderr JSON includes the reason and a short PTY tail.
+`wait` polls for 5 seconds. A `ctl` read that does not answer is killed when that deadline passes. `pty` replays the log onto the 100×30 screen and matches the text visible there. A cell update that leaves part of a phrase in place still matches the whole phrase. `screen`, `status`, and `messages` read `ctl screen`, `state.status`, and `ctl messages`. Exit 0 is `{"ok":true,"via":...}`. Exit 1 means the text did not appear; the stderr JSON includes the reason and, for `pty`, the replayed screen.
 
-The PTY log is append-only. A string in it proves it was rendered at least once. It does not prove the string is still on screen, and a string that scrolled off is still in the log. Current inbox, draft, and message state come from `ctl`.
+The saved `pty.log` is the raw byte log and keeps old frames. `wait pty` searches the screen those bytes currently show, not the raw log. Current inbox, draft, and message state come from `ctl`.
 
 The three demo rows, their session ids, unread counts, and last messages are listed once in `features/README.md`. Startup opens `session_demo_1` and leaves the inbox pane focused. The composer is focused by Enter on an inbox row, by the second `tab` from the inbox, or by `ctl draft`.
 

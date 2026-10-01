@@ -328,10 +328,114 @@ async function assess(runId: string, timeoutMs = WAIT_MS) {
   }
 }
 
-async function readPty(runId: string) {
+async function readPtyBytes(runId: string) {
   const path = paths(runId).ptyLog
-  if (!existsSync(path)) return ""
-  return new TextDecoder().decode(await Bun.file(path).bytes())
+  if (!existsSync(path)) return new Uint8Array()
+  return new Uint8Array(await Bun.file(path).bytes())
+}
+
+async function readPty(runId: string) {
+  return new TextDecoder().decode(await readPtyBytes(runId))
+}
+
+// Replay the log onto the capture grid. A cell that did not change is left in
+// place, so the visible phrase is not always one contiguous byte string.
+export function visibleScreen(data: Uint8Array, cols = COLS, rows = ROWS) {
+  const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => " "))
+  let row = 0
+  let col = 0
+  let savedRow = 0
+  let savedCol = 0
+  let i = 0
+  const decode = (at: number): [string, number] => {
+    const b = data[at] ?? 0
+    if (b < 0x80) return [String.fromCharCode(b), 1]
+    if ((b & 0xe0) === 0xc0 && at + 1 < data.length) return [String.fromCodePoint(((b & 0x1f) << 6) | (data[at + 1]! & 0x3f)), 2]
+    if ((b & 0xf0) === 0xe0 && at + 2 < data.length) return [String.fromCodePoint(((b & 0x0f) << 12) | ((data[at + 1]! & 0x3f) << 6) | (data[at + 2]! & 0x3f)), 3]
+    if ((b & 0xf8) === 0xf0 && at + 3 < data.length) {
+      return [String.fromCodePoint(((b & 0x07) << 18) | ((data[at + 1]! & 0x3f) << 12) | ((data[at + 2]! & 0x3f) << 6) | (data[at + 3]! & 0x3f)), 4]
+    }
+    return [String.fromCharCode(b), 1]
+  }
+  while (i < data.length) {
+    const b = data[i]!
+    if (b === 0x1b) {
+      i += 1
+      if (i >= data.length) break
+      const kind = data[i]!
+      i += 1
+      if (kind === 0x5b) {
+        const start = i
+        while (i < data.length && !(data[i]! >= 0x40 && data[i]! <= 0x7e)) i += 1
+        if (i >= data.length) break
+        const final = data[i]!
+        const body = data.subarray(start, i)
+        i += 1
+        const first = body[0]
+        if (first === 0x3f || first === 0x3e || first === 0x3d || first === 0x3c) continue
+        const parts = body.length === 0 ? [] : new TextDecoder().decode(body).split(";")
+        const num = (index: number, fallback: number) => {
+          const part = parts[index]
+          if (!part) return fallback
+          const value = Number(part)
+          return Number.isFinite(value) ? value : fallback
+        }
+        if (final === 0x48 || final === 0x66) {
+          row = Math.max(0, num(0, 1) - 1)
+          col = Math.max(0, num(1, 1) - 1)
+        } else if (final === 0x41) row = Math.max(0, row - num(0, 1))
+        else if (final === 0x42) row = Math.min(rows - 1, row + num(0, 1))
+        else if (final === 0x43) col = Math.min(cols, col + num(0, 1))
+        else if (final === 0x44) col = Math.max(0, col - num(0, 1))
+        else if (final === 0x73) {
+          savedRow = row
+          savedCol = col
+        } else if (final === 0x75) {
+          row = savedRow
+          col = savedCol
+        } else if (final === 0x4a && num(0, 0) === 2) {
+          for (const line of cells) line.fill(" ")
+          row = 0
+          col = 0
+        } else if (final === 0x4b && row >= 0 && row < rows) {
+          for (let c = Math.max(0, col); c < cols; c++) cells[row]![c] = " "
+        }
+      } else if (kind === 0x5d) {
+        while (i < data.length && data[i] !== 0x07) {
+          if (data[i] === 0x1b && i + 1 < data.length && data[i + 1] === 0x5c) {
+            i += 2
+            break
+          }
+          i += 1
+        }
+        if (i < data.length && data[i] === 0x07) i += 1
+      } else if (kind === 0x50 || kind === 0x5f || kind === 0x5e || kind === 0x58) {
+        while (i + 1 < data.length && !(data[i] === 0x1b && data[i + 1] === 0x5c)) i += 1
+        i = Math.min(data.length, i + 2)
+      }
+      continue
+    }
+    if (b === 0x0a) {
+      row += 1
+      col = 0
+      i += 1
+      continue
+    }
+    if (b === 0x0d) {
+      col = 0
+      i += 1
+      continue
+    }
+    if (b < 32) {
+      i += 1
+      continue
+    }
+    const [ch, size] = decode(i)
+    if (row >= 0 && row < rows && col >= 0 && col < cols) cells[row]![col] = ch
+    col += 1
+    i += size
+  }
+  return cells.map(line => line.join("").trimEnd()).join("\n")
 }
 
 function encodeKeys(name: string, text: string | undefined, repeat: number) {
@@ -411,9 +515,9 @@ async function supervise(runId: string) {
   assertRunId(runId)
   const repo = await findRepo(import.meta.dir)
   const expected = paths(runId)
-  await mkdir(expected.dir, { recursive: true, mode: 0o700 })
+  if (!existsSync(expected.dir)) throw new Error(`Run directory does not exist for ${runId}`)
   await chmod(expected.dir, 0o700)
-  await mkdir(expected.evidence, { recursive: true })
+  if (!existsSync(expected.evidence)) throw new Error(`Evidence directory does not exist for ${runId}`)
   const meta: Meta = {
     runId,
     repo,
@@ -542,12 +646,36 @@ function handleClient(connection: Socket, handle: (request: Record<string, unkno
   })
 }
 
+function errnoCode(error: unknown) {
+  return error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : ""
+}
+
 async function assertFreshEvidence(runId: string) {
   const dir = paths(runId).evidence
   if (!existsSync(dir)) return
   if ((await readdir(dir)).length > 0) {
     throw new Error(`Evidence for ${runId} already exists at ${dir}. Choose another --run. Cleanup keeps that directory so a later launch cannot append to it.`)
   }
+}
+
+async function claimRunDirectory(runId: string) {
+  try {
+    await mkdir(paths(runId).dir, { mode: 0o700 })
+  } catch (error) {
+    if (errnoCode(error) === "EEXIST") {
+      throw new Error(`Run directory already exists for ${runId}. Run cleanup or choose another --run.`)
+    }
+    throw error
+  }
+}
+
+async function claimEvidence(runId: string) {
+  try {
+    await mkdir(paths(runId).evidence)
+  } catch (error) {
+    if (errnoCode(error) !== "EEXIST") throw error
+  }
+  await assertFreshEvidence(runId)
 }
 
 async function launch(runId: string) {
@@ -557,23 +685,22 @@ async function launch(runId: string) {
   if (!existsSync(index)) throw new Error(`Missing ${index}`)
   if (!existsSync(join(repo, "node_modules"))) throw new Error("node_modules is missing. Run bun install in the crisp-tui checkout, then launch again.")
   const expected = paths(runId)
-  if (existsSync(expected.dir)) throw new Error(`Run directory already exists for ${runId}. Run cleanup or choose another --run.`)
   await assertFreshEvidence(runId)
   await mkdir("/tmp/crisp-tui-verify", { recursive: true, mode: 0o700 })
   await chmod("/tmp/crisp-tui-verify", 0o700)
-  await mkdir(expected.dir, { recursive: true, mode: 0o700 })
-  await chmod(expected.dir, 0o700)
-  await mkdir(expected.evidence, { recursive: true })
-  const logFd = openSync(expected.supervisorLog, "a")
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "supervise", runId], {
-    detached: true,
-    stdio: ["ignore", logFd, logFd],
-    cwd: repo,
-    env: process.env,
-  })
-  child.unref()
-  closeSync(logFd)
+  await claimRunDirectory(runId)
   try {
+    await chmod(expected.dir, 0o700)
+    await claimEvidence(runId)
+    const logFd = openSync(expected.supervisorLog, "a")
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "supervise", runId], {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      cwd: repo,
+      env: process.env,
+    })
+    child.unref()
+    closeSync(logFd)
     const end = Date.now() + READY_MS
     let last = "supervisor did not become ready"
     while (Date.now() < end) {
@@ -605,7 +732,7 @@ async function waitFor(runId: string, kind: string, text: string) {
   }
   while (Date.now() < end) {
     let hay = ""
-    if (kind === "pty") hay = await readPty(runId)
+    if (kind === "pty") hay = visibleScreen(await readPtyBytes(runId))
     else {
       const args = kind === "messages" ? ["messages"] : kind === "screen" ? ["screen"] : ["state"]
       const remaining = end - Date.now()
@@ -625,7 +752,8 @@ async function waitFor(runId: string, kind: string, text: string) {
     if (pause <= 0) break
     await Bun.sleep(pause)
   }
-  throw new Error(`Timed out waiting for ${kind} to include ${JSON.stringify(text)}\n${(await readPty(runId)).slice(-500)}`)
+  const tail = kind === "pty" ? visibleScreen(await readPtyBytes(runId)) : (await readPty(runId)).slice(-500)
+  throw new Error(`Timed out waiting for ${kind} to include ${JSON.stringify(text)}\n${tail}`)
 }
 
 async function capture(runId: string, name: string, action: string | undefined) {
@@ -743,4 +871,4 @@ async function main() {
   }
 }
 
-await main()
+if (import.meta.main) await main()
