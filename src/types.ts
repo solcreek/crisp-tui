@@ -27,7 +27,8 @@ export interface CrispClient {
 }
 export interface RealtimeEvent { event: string; data: Record<string, unknown>; received_at: string }
 export interface RealtimeStatus { state: "connecting" | "authenticated" | "reconnecting" | "error"; message?: string }
-export type RealtimeSubscribe = (event: (value: RealtimeEvent) => void, status: (value: RealtimeStatus) => void) => () => void
+export type Cleanup = (() => void) & { done?: Promise<void> }
+export type RealtimeSubscribe = (event: (value: RealtimeEvent) => void, status: (value: RealtimeStatus) => void) => Cleanup
 export const label = (c: Conversation) => c.meta?.nickname || c.meta?.email || c.session_id
 // Terminal control characters from remote content must never reach the display.
 export const clean = (text: string) => text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "")
