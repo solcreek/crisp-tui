@@ -38,3 +38,20 @@ test("runner reports a deadline as a failed operation even if JSON was written",
   const run = runner([process.execPath, "-e", "console.log('{}');setInterval(()=>{},1000)"], [], process.env, 200)
   await expect(run([])).rejects.toThrow("crispctl timed out")
 })
+
+for (const stream of ["stdout", "stderr"] as const) test(`oversized ${stream} terminates the child, discards output and clears the timer`, async () => {
+  const ready = join(scratch, `large-${stream}`), clock = new TestClock()
+  const code = `require('node:fs').writeFileSync(process.env.TEST_READY,String(process.pid));
+    process.${stream}.write('synthetic-secret'.repeat(1000));setInterval(()=>{},1000)`
+  const task = capture(["node", "-e", code], 30_000, { PATH: process.env.PATH, TEST_READY: ready }, clock, 1024)
+  await expect(task).rejects.toThrow("Subprocess output exceeded its size limit")
+  const pid = Number(await Bun.file(ready).text())
+  expect(() => process.kill(pid, 0)).toThrow()
+  expect(clock.pending).toBe(0)
+})
+
+test("output exactly at its byte budget is preserved, including multibyte text", async () => {
+  const result = await capture(["node", "-e", "process.stdout.write('中'.repeat(10))"], 30_000, process.env, new TestClock(), 30)
+  expect(result.stdout).toBe("中".repeat(10))
+  expect(result.code).toBe(0)
+})
