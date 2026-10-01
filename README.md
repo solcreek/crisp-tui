@@ -228,6 +228,16 @@ crispctl's own output and exit code.
 It switches to the target conversation and focuses the composer. There is no
 control-socket send method; direct automated writes belong to crispctl.
 
+Control actions have a 70-second deadline and a maximum of 64 outstanding actions.
+Queued actions are cancelled when the caller disconnects, the deadline expires,
+or the TUI shuts down. Cancellation during a conversation read prevents the
+subsequent draft from being applied; the read itself may still complete and
+update navigation. A timeout is not a rollback: inspect `state` before retrying,
+since an action may have completed before its response reached the caller.
+Shutdown waits for active control requests and polling/RTM reads to settle.
+One-shot subprocess stdout and stderr each have a 16 MiB limit; oversized output
+is discarded and the child is terminated.
+
 ### Control protocol
 
 Unix socket in `/tmp/crisp-tui-<uid>/<profile-and-website-hash>.sock`.
@@ -237,7 +247,10 @@ private parent directory. Demo and live share the selected profile socket, so
 inspect `state.source` before acting. Processes using different config files
 under the same profile name should use different socket overrides.
 
-One newline-delimited JSON request per connection:
+One newline-delimited JSON request per connection. Keep the connection open until
+the response arrives. An optional top-level `deadline` is a Unix timestamp in
+milliseconds; the server caps it at 70 seconds from receipt:
+
 
 ```json
 {"id":1,"method":"draft","params":{"session":"session_demo_1","text":"Hello","note":false}}
@@ -302,11 +315,15 @@ crispctl bridge. The package check downloads dependencies from npm; Crisp API
 access is not required. CI runs on macOS/Linux arm64/x64 with Node.js 22.12.0 or 24.
 
 Coverage excludes test fixtures/helpers, checks for missing source files, and
-enforces overall 90% line and function thresholds from LCOV counts. CI uploads
+enforces overall 90% line and function thresholds for `src` from LCOV counts.
+The release coordinator has a separate 90% line/function gate; tests simulate
+registry delays, transient failures and partial releases with a fake clock. CI uploads
 `coverage/lcov.info` for each platform. The report measures code executed within
 the test process; PTY subprocess coverage
 (including the thin `src/index.ts` entrypoint) is not merged into that percentage.
-The subprocess tests independently verify the executable behavior.
+The subprocess tests independently verify the executable behavior, including
+non-demo profile startup, website-token validation and read-only flag/environment
+settings through a synthetic crispctl executable. No real credentials are used.
 
 ### Publishing platform packages
 
@@ -319,7 +336,10 @@ Tag releases use `.github/workflows/publish.yml` and npm trusted publishing
 `package.json`, runs the complete four-platform CI without restored caches, and
 publishes its verified artifacts. Platform packages must become publicly
 available before the launcher is published. Registry integrity checks prevent
-overwriting or silently accepting an unrelated existing version.
+overwriting or silently accepting an unrelated existing version. All existing
+versions are checked before the first publish. Temporary registry read failures
+are retried within the release deadline; publish writes are never automatically
+retried. A rerun skips only artifacts whose registry integrity matches exactly.
 
 Configure each package once with npm 11.15.0 or newer, a logged-in maintainer
 account and 2FA:
