@@ -23,10 +23,12 @@ function run(expected: Request[] = [], flags: string[] = []) {
 }
 function client(request: Request, flags: string[] = []) { return createClient(run([request], flags), "contract") }
 
+// Each contract may start several real Node processes; cold CI runners need
+// more than the unit-test default of five seconds for the whole sequence.
 test("installed crispctl exposes the expected version and redacted website auth", async () => {
   expect(await run()(["--version"])).toEqual({ version: pkg.dependencies.crispctl })
   expect(await run()(["auth", "show"])).toMatchObject({ tier: "website", key: "set", identifier: "fixture-identifier", website_id: website })
-})
+}, 30_000)
 
 test("real crispctl parses adapter list, search, get and message arguments", async () => {
   expect(await client({ method: "GET", path: `${site}/conversations/2`, response: ok([conversation]) }).list(2, "")).toEqual([conversation])
@@ -35,7 +37,7 @@ test("real crispctl parses adapter list, search, get and message arguments", asy
   expect(await client({ method: "GET", path: `${site}/conversation/${session}`, response: ok(conversation) }).get(session)).toEqual(conversation)
   const messages = [{ timestamp: 2, content: "new" }, { timestamp: 1, content: "old" }]
   expect(await client({ method: "GET", path: `${site}/conversation/${session}/messages`, response: ok(messages) }).messages(session)).toEqual(messages.toReversed())
-})
+}, 30_000)
 
 test("real crispctl preserves arbitrary reply/note content and mutation payloads in mocked HTTP", async () => {
   const text = "--flag\n你好 $(whoami) `literal`"
@@ -49,7 +51,7 @@ test("real crispctl preserves arbitrary reply/note content and mutation payloads
   }
   await client({ method: "PATCH", path: `${site}/conversation/${session}/read`,
     body: { from: "operator", origin: "chat" }, response: ok({}) }).read(session)
-})
+}, 30_000)
 
 test("real crispctl blocks every adapter write in read-only mode before HTTP", async () => {
   const api = createClient(run([], ["--read-only"]), "contract")
@@ -57,7 +59,7 @@ test("real crispctl blocks every adapter write in read-only mode before HTTP", a
     () => api.state(session, true), () => api.state(session, false), () => api.read(session)]) {
     await expect(write()).rejects.toThrow("read-only mode")
   }
-})
+}, 30_000)
 
 test("real crispctl API errors retain exit codes and redact the token", async () => {
   try {
@@ -70,4 +72,4 @@ test("real crispctl API errors retain exit codes and redact the token", async ()
     expect((error as Error).message).toContain("denied")
     expect((error as Error).message).not.toContain("fixture-key")
   }
-})
+}, 30_000)
