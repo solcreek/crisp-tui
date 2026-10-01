@@ -1,12 +1,13 @@
 import type { Store } from "./store"
 
 type Params = Record<string, unknown>
+export interface CommandContext { signal?: AbortSignal; deadline?: number }
 interface Command {
   fields: Record<string, "string" | "boolean">
   mode: "snapshot" | "action"
   allowedInReadOnly: boolean
   output: "json" | "text"
-  execute: (store: Store, params: Params, focus: () => void) => unknown
+  execute: (store: Store, params: Params, focus: () => void, check: () => void) => unknown
 }
 
 /** CLI syntax, socket validation, permissions and execution share this registry. */
@@ -19,15 +20,18 @@ export const commands: Readonly<Record<string, Command>> = {
     await store.refresh()
     return store.snapshot()
   } },
-  goto: { fields: { session: "string" }, mode: "action", allowedInReadOnly: true, output: "json", execute: async (store, params) => {
+  goto: { fields: { session: "string" }, mode: "action", allowedInReadOnly: true, output: "json", execute: async (store, params, _focus, check) => {
+    check()
     await store.open(params.session as string)
+    check()
     store.update({ status: "Agent opened a conversation" })
     return store.snapshot()
   } },
   draft: { fields: { session: "string", text: "string", note: "boolean", replace: "boolean" },
-    mode: "action", allowedInReadOnly: false, output: "json", execute: async (store, params, focus) => {
+    mode: "action", allowedInReadOnly: false, output: "json", execute: async (store, params, focus, active) => {
       const session = params.session as string
       const check = () => {
+        active()
         if (store.state.readOnly) throw new Error("Read-only mode: agent drafts are disabled")
         if (store.state.sending) throw new Error("A send is in progress")
         if (store.state.drafts[session]?.text && params.replace !== true) throw new Error("Draft already exists; use --replace to overwrite it")
@@ -74,15 +78,24 @@ export function parseControlCommand(method: string | undefined, args: string[], 
 
 export function controller(store: Store, focus: () => void = () => {}) {
   let pending = Promise.resolve<unknown>(null)
-  return async (method: string, input: Params) => {
+  let queued = 0
+  return async (method: string, input: Params, context: CommandContext = {}) => {
     const { command, params } = validateCommand(method, input)
+    const check = () => {
+      context.signal?.throwIfAborted()
+      if (context.deadline !== undefined && Date.now() >= context.deadline) throw new Error("Control command expired")
+    }
+    check()
     const execute = () => {
+      check()
       if (store.state.readOnly && !command.allowedInReadOnly) throw new Error("Read-only mode: agent drafts are disabled")
-      return command.execute(store, params, focus)
+      return command.execute(store, params, focus, check)
     }
     // Snapshots remain available while screen-changing actions wait on I/O.
     if (command.mode === "snapshot") return execute()
-    const task = pending.then(execute)
+    if (queued >= 64) throw new Error("Control command queue is full; retry later")
+    queued++
+    const task = pending.then(execute).finally(() => { queued-- })
     pending = task.catch(() => {})
     return task
   }
