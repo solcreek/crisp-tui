@@ -3,5 +3,5 @@ preload = ["@opentui/solid/preload"]
 [test]
 preload = ["@opentui/solid/preload"]
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["test/**"]
+coveragePathIgnorePatterns = ["test/**", ".cursor/**"]
 coverageReporter = ["text", "lcov"]
