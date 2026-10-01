@@ -1,0 +1,32 @@
+{
+  "name": "crisp-tui",
+  "version": "0.1.0",
+  "description": "A terminal inbox for Crisp, with JSON control commands for agents",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/solcreek/crisp-tui.git" },
+  "homepage": "https://github.com/solcreek/crisp-tui#readme",
+  "bugs": { "url": "https://github.com/solcreek/crisp-tui/issues" },
+  "type": "module",
+  "bin": { "crisp-tui": "bin/crisp-tui.js" },
+  "files": ["bin/crisp-tui.js", "dist/cli.js", "README.md", "LICENSE"],
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "demo": "bun run src/index.ts --demo",
+    "live:readonly": "bun run scripts/live-readonly.ts",
+    "live:check": "bun run scripts/live-readonly.ts --check",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun run scripts/build.ts",
+    "build:package": "bun run scripts/build-package.ts",
+    "prepack": "bun run build:package"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.12",
+    "@opentui/solid": "0.5.12",
+    "crispctl": "0.2.0",
+    "solid-js": "1.9.12"
+  },
+  "devDependencies": { "@types/bun": "1.3.14", "typescript": "5.9.3" },
+  "engines": { "bun": ">=1.4.2" }
+}

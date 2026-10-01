@@ -1,0 +1,5 @@
+if (!process.argv.includes("--read-only") || !process.argv.includes("listen")) process.exit(2)
+console.error(JSON.stringify({ status: "authenticated" }))
+console.log(JSON.stringify({ event: "message:send", received_at: new Date().toISOString(), data: { session_id: "session_demo_1", content: "你好" } }))
+setInterval(() => {}, 1000)
+process.on("SIGTERM", () => process.exit(0))

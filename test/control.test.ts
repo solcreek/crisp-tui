@@ -1,0 +1,34 @@
+import { afterEach, expect, test } from "bun:test"
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { controller, NotRunning, request, serve } from "../src/control"
+import { demoClient } from "../src/demo"
+import { Store } from "../src/store"
+
+const cleanups: (() => Promise<unknown>)[] = []
+afterEach(async () => { for (const fn of cleanups.splice(0).reverse()) await fn() })
+async function path() {
+  const dir = await mkdtemp("/tmp/otc-test-")
+  cleanups.push(() => rm(dir, { recursive: true, force: true }))
+  return join(dir, "control.sock")
+}
+test("private socket exposes state and drafts end to end", async () => {
+  const p = await path(), store = new Store(demoClient())
+  await store.refresh()
+  const server = await serve(p, controller(store)); cleanups.push(() => server.stop())
+  expect((await stat(p)).mode & 0o777).toBe(0o600)
+  expect(await request(p, "state")).toMatchObject({ protocol: 1, source: "DEMO · local only" })
+  expect(await request(p, "draft", { session: "session_demo_2", text: "中文草稿", note: true })).toMatchObject({ sent: false })
+  expect(await request(p, "screen")).toContain("中文草稿")
+  await expect(request(p, "send")).rejects.toThrow("Unknown")
+  await expect(serve(p, controller(store))).rejects.toThrow("already running")
+})
+test("missing socket has a distinct error", async () => {
+  await expect(request(await path(), "state")).rejects.toBeInstanceOf(NotRunning)
+})
+test("server never removes an ordinary file at socket path", async () => {
+  const p = await path()
+  await writeFile(p, "keep")
+  await expect(serve(p, () => null)).rejects.toThrow("non-socket")
+  expect(await Bun.file(p).text()).toBe("keep")
+})
