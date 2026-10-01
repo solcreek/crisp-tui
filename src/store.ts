@@ -286,10 +286,23 @@ export class Store {
   refresh(requiredEpoch?: number): Promise<void> {
     if (this.refreshTask) return this.refreshTask
     this.refreshTask = this.metrics.measure("client.refresh", async () => {
-      if (requiredEpoch === undefined || !this.listFresh(requiredEpoch)) await this.fetchList(this.state.query, this.state.page)
-      else this.metrics.increment("reads.list_reused")
-      if (!await this.selectInitialConversation() && !this.state.conversationLoading) {
-        await this.refreshMessages(requiredEpoch)
+      const selected = this.state.selectedSession !== null
+      const list = requiredEpoch === undefined || !this.listFresh(requiredEpoch)
+        ? this.fetchList(this.state.query, this.state.page)
+        : (this.metrics.increment("reads.list_reused"), Promise.resolve())
+      if (selected) {
+        // A known selection does not depend on the inbox response. Drain both
+        // branches before releasing refreshTask, including when either fails.
+        const outcomes = await Promise.allSettled([list,
+          this.state.conversationLoading ? Promise.resolve() : this.refreshMessages(requiredEpoch),
+        ])
+        const failures = outcomes.filter(result => result.status === "rejected")
+        // Keep independent failures so recovering one cannot hide the other.
+        for (const failure of failures.slice(1)) this.reportError(failure.reason)
+        if (failures[0]) throw failures[0].reason
+      } else {
+        await list
+        await this.selectInitialConversation()
       }
       this.markInitialReadComplete()
       this.markRealtimeSynced()
