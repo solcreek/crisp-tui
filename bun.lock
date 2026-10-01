@@ -7,7 +7,7 @@
       "dependencies": {
         "@opentui/core": "0.5.12",
         "@opentui/solid": "0.5.12",
-        "crispctl": "0.3.0",
+        "crispctl": "0.3.1",
         "solid-js": "1.9.12",
       },
       "devDependencies": {
@@ -133,7 +133,7 @@
 
     "convert-source-map": ["convert-source-map@2.0.0", "", {}, "sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg=="],
 
-    "crispctl": ["crispctl@0.3.0", "", { "dependencies": { "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-66rg9xEvRv6nxQVMfZWjVNM66Nu3J8DV0ZVOUKUVK7ABur8V4hICoUE3MbLNJhcXKAirrMmfHHybvbCEX4vN0A=="],
+    "crispctl": ["crispctl@0.3.1", "", { "dependencies": { "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-oYBOe/k55cPn8LV5wp1bI0Zky6BVcrPj6tAwfdMFevbxDEf/YNBgMOzTJwsuFCOeRSRKp5q4P0XoHMJBY8ZRKg=="],
 
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
