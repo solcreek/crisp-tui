@@ -21,6 +21,8 @@ test("private socket exposes state and drafts end to end", async () => {
   expect(await request(p, "draft", { session: "session_demo_2", text: "中文草稿", note: true })).toMatchObject({ sent: false })
   expect(await request(p, "screen")).toContain("中文草稿")
   await expect(request(p, "send")).rejects.toThrow("Unknown")
+  await expect(request(p, "state", { surprise: true })).rejects.toThrow("Unknown state parameter")
+  await expect(request(p, "draft", { session: "session_demo_2", text: "text", note: "false" })).rejects.toThrow("boolean")
   await expect(serve(p, controller(store))).rejects.toThrow("already running")
 })
 test("missing socket has a distinct error", async () => {

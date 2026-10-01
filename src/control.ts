@@ -2,7 +2,7 @@ import { createConnection, createServer, type Socket } from "node:net"
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createHash } from "node:crypto"
-import type { Store } from "./store"
+export { controller } from "./commands"
 
 const LIMIT = 1_048_576
 export function socketPath(profile = "sandbox", website = "") {
@@ -100,54 +100,3 @@ export async function serve(path: string, handle: (method: string, params: Recor
   } }
 }
 
-function string(params: Record<string, unknown>, key: string) {
-  const value = params[key]
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${key} must be a non-empty string`)
-  return value
-}
-export function controller(store: Store, focus: () => void = () => {}) {
-  // Local snapshots stay observable while screen-changing requests wait on I/O.
-  const snapshots = new Set(["state", "screen", "conversations", "messages"])
-  // Serialize screen-changing requests so overlapping drafts cannot land in another session.
-  let pending = Promise.resolve<unknown>(null)
-  const handle = async (method: string, params: Record<string, unknown>) => {
-    switch (method) {
-      case "state": return store.snapshot()
-      case "screen": return store.screen()
-      case "conversations": return store.state.conversations
-      case "messages": return store.state.messages
-      case "goto": {
-        await store.open(string(params, "session"))
-        store.update({ status: "Agent opened a conversation" })
-        return store.snapshot()
-      }
-      case "draft": {
-        if (store.state.readOnly) throw new Error("Read-only mode: agent drafts are disabled")
-        const session = string(params, "session")
-        const text = string(params, "text")
-        if (params.note !== undefined && typeof params.note !== "boolean") throw new Error("note must be boolean")
-        if (params.replace !== undefined && typeof params.replace !== "boolean") throw new Error("replace must be boolean")
-        const check = () => {
-          if (store.state.sending) throw new Error("A send is in progress")
-          if (store.state.drafts[session]?.text && params.replace !== true) throw new Error("Draft already exists; use --replace to overwrite it")
-        }
-        check()
-        if (store.state.active?.session_id !== session) await store.open(session)
-        if (store.state.active?.session_id !== session) throw new Error("Conversation changed while preparing draft; retry")
-        check()
-        store.setDraft(text, params.note === true)
-        store.update({ status: "Agent draft ready · review and press Enter to send" })
-        focus()
-        return { session, draft: store.draft(), sent: false }
-      }
-      case "refresh": await store.refresh(); return store.snapshot()
-      default: throw new Error(`Unknown control method: ${method}`)
-    }
-  }
-  return (method: string, params: Record<string, unknown>) => {
-    if (snapshots.has(method)) return handle(method, params)
-    const task = pending.then(() => handle(method, params))
-    pending = task.catch(() => {})
-    return task
-  }
-}

@@ -199,7 +199,8 @@ bun run src/index.ts ctl refresh
 bun run src/index.ts ctl screen
 ```
 
-`state` includes protocol version, source, current page/query, active conversation,
+`state` includes protocol version, source, current page/query, selected session,
+conversation-loading state, active conversation,
 loaded messages, per-session drafts and status. `messages` and `conversations`
 return the currently loaded page, without an API call. `screen` is a semantic
 text view of the loaded content, not an exact terminal screenshot. All other
@@ -227,8 +228,12 @@ One newline-delimited JSON request per connection:
 ```
 
 Response: `{"id":1,"ok":true,"result":…}` or
-`{"id":1,"ok":false,"error":"…"}`. Methods match `ctl` verbs. Screen-changing
-agent requests are serialized. No TCP server, daemon or MCP server is started.
+`{"id":1,"ok":false,"error":"…"}`. Methods match `ctl` verbs. Unknown parameters
+and invalid types are rejected. Screen-changing agent requests are serialized;
+local snapshots (`state`, `screen`, `conversations`, `messages`) remain available
+while a refresh or navigation waits on the API. CLI syntax, parameter validation
+and command permissions are defined together in `src/commands.ts`.
+No TCP server, daemon or MCP server is started.
 
 ## Refresh and current boundaries
 

@@ -5,13 +5,12 @@ import { NotRunning, request, socketPath } from "./control"
 import { Store } from "./store"
 import { readOnlyClient } from "./readonly"
 import { listen } from "./rtm"
+import { controlHelp, parseControlCommand } from "./commands"
 
 export const help = `crisp-tui — Crisp inbox for people and agents
 
   crisp-tui [tui] [--demo] [--read-only] [--profile sandbox] [--website ID]
-  crisp-tui ctl state|screen|conversations|messages|refresh
-  crisp-tui ctl goto SESSION
-  crisp-tui ctl draft SESSION TEXT [--note] [--replace]
+${controlHelp.map(line => `  crisp-tui ${line}`).join("\n")}
   crisp-tui cli <crispctl arguments...>
   crisp-tui live --item ITEM [--website ID]    # read-only TUI using 1Password
   crisp-tui check --item ITEM [--website ID]   # bounded read-only connection check
@@ -52,14 +51,11 @@ export async function main(args: string[]) {
   const path = socketPath(opts.profile, opts.website)
   if (mode === "ctl") {
     if (opts.demo || opts["read-only"] || opts.poll !== 60) throw new CliError("--demo, --read-only and --poll are TUI options", 2)
-    const simple = ["state", "screen", "conversations", "messages", "refresh"]
-    let params: Record<string, unknown> = {}
-    if (simple.includes(verb || "") && rest.length === 0 && !opts.note && !opts.replace) {}
-    else if (verb === "goto" && rest.length === 1 && !opts.note && !opts.replace) params = { session: rest[0] }
-    else if (verb === "draft" && rest.length === 2) params = { session: rest[0], text: rest[1], note: !!opts.note, replace: !!opts.replace }
-    else throw new CliError("Usage: ctl state|screen|conversations|messages|refresh; ctl goto SESSION; ctl draft SESSION TEXT [--note] [--replace]", 2)
-    const result = await request(path, verb!, params)
-    console.log(verb === "screen" ? result : JSON.stringify(result))
+    let parsed: ReturnType<typeof parseControlCommand>
+    try { parsed = parseControlCommand(verb, rest, opts) }
+    catch (error) { throw new CliError(error instanceof Error ? error.message : "Invalid control arguments", 2) }
+    const result = await request(path, parsed.method, parsed.params)
+    console.log(parsed.command.output === "text" ? result : JSON.stringify(result))
     return 0
   }
   if ((mode && mode !== "tui") || verb || rest.length || opts.note || opts.replace) throw new CliError("Unknown command or option. Use --help; API commands go after 'cli'.", 2)
