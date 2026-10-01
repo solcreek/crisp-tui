@@ -3,11 +3,11 @@
 [![CI](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/crisp-tui?logo=npm)](https://www.npmjs.com/package/crisp-tui)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Node.js: >=20](https://img.shields.io/badge/Node.js-%3E%3D20-5fa04e?logo=nodedotjs)](https://nodejs.org)
+[![Node.js: >=22.12.0](https://img.shields.io/badge/Node.js-%3E%3D22.12.0-5fa04e?logo=nodedotjs)](https://nodejs.org)
 
 Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
-[crispctl](https://github.com/solcreek/crisp-cli) v0.3.1 provides all REST and RTM
+[crispctl](https://github.com/solcreek/crisp-cli) v0.4.0 provides all REST and RTM
 access. Both profile-based and 1Password sessions use its JSON interface;
 this project has no separate HTTP or Socket.IO implementation.
 
@@ -18,7 +18,7 @@ for human review; all contacts and messages shown are demo data.
 
 ## Install
 
-Requires Node.js 20 or newer on macOS or Linux (glibc), on arm64 or x64.
+Requires Node.js 22.12.0 or newer on macOS or Linux (glibc), on arm64 or x64.
 **Bun is not required for npm/npx users.** npm installs the matching precompiled
 executable, including the Bun runtime and OpenTUI renderer, automatically.
 Windows and musl/Alpine are not currently supported.
@@ -47,7 +47,8 @@ Installation requires no lifecycle scripts or first-run download.
 
 ## Run from source
 
-Requires Bun 1.4.2 or newer on macOS or Linux. Demo mode needs no credentials.
+Requires Bun 1.4.2 or newer on macOS or Linux, plus Node.js 22.12.0 or newer for
+crispctl. Demo mode needs no credentials.
 
 ```sh
 git clone https://github.com/solcreek/crisp-tui.git
@@ -116,10 +117,10 @@ requests use Basic auth with `identifier:key` and `X-Crisp-Tier: website`.
 The token belongs to one workspace. `crispctl` supplies these headers; this
 project never includes the secret in UI state or stores a second copy.
 
-This source checkout uses crispctl v0.3.1. To configure it separately on PATH:
+This source checkout uses crispctl v0.4.0. To configure it separately on PATH:
 
 ```sh
-npm install -g crispctl@0.3.1
+npm install -g crispctl@0.4.0
 ```
 
 Alternatively, build [crisp-cli from source](https://github.com/solcreek/crisp-cli#install)
@@ -298,7 +299,7 @@ PATH. A local test registry lets real `npm exec`/`npx` install the root package
 and choose the correct platform dependency automatically. Both installed and
 npx workflows exercise TUI startup, agent drafts, human send, shutdown and the
 crispctl bridge. The package check downloads dependencies from npm; Crisp API
-access is not required. CI runs on macOS/Linux arm64/x64 with Node.js 20 or 24.
+access is not required. CI runs on macOS/Linux arm64/x64 with Node.js 22.12.0 or 24.
 
 Coverage excludes test fixtures/helpers, checks for missing source files, and
 enforces overall 90% line and function thresholds from LCOV counts. CI uploads

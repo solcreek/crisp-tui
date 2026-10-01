@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { strict as assert } from "node:assert"
@@ -42,6 +42,11 @@ try {
   assert.match(await run([executable, "--help"], scratch, isolated), /Crisp inbox/)
   const version = JSON.parse(await run([executable, "cli", "--version", "--json"], scratch, isolated))
   assert.equal(version.version, pkg.dependencies.crispctl)
+  const oldNode = join(scratch, "old-node.mjs")
+  for (const unsupported of ["20.20.0", "22.11.0"]) {
+    await writeFile(oldNode, `Object.defineProperty(process.versions, "node", { value: ${JSON.stringify(unsupported)} })`)
+    await assert.rejects(run([node, "--import", oldNode, executable, "--help"], scratch, isolated), /requires Node\.js >=22\.12\.0/)
+  }
   await assert.rejects(run([executable, "--unknown-option"], scratch, isolated), /failed \(2\)/)
   const testEnv = { ...isolated, CRISP_TUI_TEST_INSTALLED: executable, CRISP_TUI_TEST_INSTALLED_ONLY: "1" }
   await run([process.execPath, "test", "test/e2e.test.ts"], root, testEnv)

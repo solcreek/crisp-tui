@@ -61,6 +61,19 @@ test("real crispctl blocks every adapter write in read-only mode before HTTP", a
   }
 }, 30_000)
 
+test("real crispctl read-only mode also blocks local credential changes", async () => {
+  await expect(run([], ["--read-only"])(["auth", "set", "--identifier", "fixture-new-id",
+    "--key", "fixture-new-key", "--tier", "website"])).rejects.toThrow("read-only mode")
+  expect(await Bun.file(join(scratch, "nonexistent.json")).exists()).toBe(false)
+}, 30_000)
+
+test("real crispctl exposes the TUI's RTM events through Commander without API access", async () => {
+  const catalog = await run([], ["--read-only"])(["listen", "--list-events"]) as { events: { event: string; tiers: string[] }[] }
+  for (const event of ["message:send", "message:received", "message:updated", "message:removed", "session:set_state"]) {
+    expect(catalog.events.find(item => item.event === event)?.tiers).toContain("website")
+  }
+}, 30_000)
+
 test("real crispctl API errors retain exit codes and redact the token", async () => {
   try {
     await client({ method: "GET", path: `${site}/conversations/1`, status: 403,

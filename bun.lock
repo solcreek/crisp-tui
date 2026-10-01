@@ -5,7 +5,7 @@
     "": {
       "name": "crisp-tui",
       "dependencies": {
-        "crispctl": "0.3.1",
+        "crispctl": "0.4.0",
       },
       "devDependencies": {
         "@opentui/core": "0.5.12",
@@ -153,6 +153,8 @@
 
     "caniuse-lite": ["caniuse-lite@1.0.30001814", "", {}, "sha512-/Uaf1lAzr59XcMpW0o96WoEfr+VXK2OX4U9AgFoiSHsVJ4HppnIFUjtYzsyDH2+tgANaQb2/oxYGwCPapN1FpA=="],
 
+    "commander": ["commander@15.0.0", "", {}, "sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg=="],
+
     "convert-source-map": ["convert-source-map@2.0.0", "", {}, "sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg=="],
 
     "crisp-tui-darwin-arm64": ["crisp-tui-darwin-arm64@workspace:packages/darwin-arm64"],
@@ -163,7 +165,7 @@
 
     "crisp-tui-linux-x64": ["crisp-tui-linux-x64@workspace:packages/linux-x64"],
 
-    "crispctl": ["crispctl@0.3.1", "", { "dependencies": { "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-oYBOe/k55cPn8LV5wp1bI0Zky6BVcrPj6tAwfdMFevbxDEf/YNBgMOzTJwsuFCOeRSRKp5q4P0XoHMJBY8ZRKg=="],
+    "crispctl": ["crispctl@0.4.0", "", { "dependencies": { "commander": "15.0.0", "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-7quzhQBARiLwbkB7PWT5RirXi1A4q469T7GT6U3CsCLWxRKp/qqPhKw5iGVaYVc59uHZ5GY87fz3L3202w2bSQ=="],
 
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 

@@ -7,6 +7,12 @@ const require = createRequire(import.meta.url)
 const pkg = require("../package.json")
 const platformPackage = `crisp-tui-${process.platform}-${process.arch}`
 try {
+  const minimum = pkg.engines.node.slice(2).split(".").map(Number)
+  const current = process.versions.node.split(".").map(part => parseInt(part, 10))
+  const difference = current.findIndex((part, index) => part !== minimum[index])
+  if (difference !== -1 && current[difference] < minimum[difference]) {
+    throw new Error(`crisp-tui requires Node.js ${pkg.engines.node}; found ${process.versions.node}. Upgrade Node.js and try again.`)
+  }
   if (!Object.hasOwn(pkg.optionalDependencies, platformPackage)) {
     throw new Error(`Unsupported platform: ${process.platform}/${process.arch}. crisp-tui supports macOS and Linux on x64 and arm64.`)
   }
