@@ -59,13 +59,15 @@ export function parseLayout(value: unknown): LayoutConfig {
 export async function loadLayout(file?: string, env = process.env): Promise<LayoutConfig> {
   const explicit = file ?? env.CRISP_TUI_CONFIG
   const location = explicit ?? join(env.XDG_CONFIG_HOME || join(env.HOME || homedir(), ".config"), "crisp-tui", "config.json")
-  let text: string
-  try { text = await Bun.file(location).text() }
+  let bytes: ArrayBuffer
+  // Read one byte beyond the limit to detect overflow without loading the whole file.
+  try { bytes = await Bun.file(location).slice(0, 65_537).arrayBuffer() }
   catch (error) {
     if (!explicit && (error as NodeJS.ErrnoException).code === "ENOENT") return structuredClone(defaultLayout)
     throw new Error(`Cannot read TUI configuration: ${location}`)
   }
-  if (Buffer.byteLength(text) > 65_536) throw new Error("TUI configuration exceeds 64 KiB")
+  if (bytes.byteLength > 65_536) throw new Error("TUI configuration exceeds 64 KiB")
+  const text = new TextDecoder().decode(bytes)
   let value: unknown
   try { value = JSON.parse(text) } catch { throw new Error("TUI configuration must be valid JSON") }
   return parseLayout(value)

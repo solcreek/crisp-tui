@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, open, rm } from "node:fs/promises"
 import { defaultLayout, loadLayout, parseLayout } from "../src/layout"
 import { conversationDetails } from "../src/details"
 import { Store } from "../src/store"
@@ -27,6 +27,37 @@ test("local layout resolution uses flag, environment, XDG and home paths without
     await expect(loadLayout(explicit, {})).rejects.toThrow("must be valid JSON")
     await Bun.write(explicit, " ".repeat(65_537))
     await expect(loadLayout(explicit, {})).rejects.toThrow("exceeds 64 KiB")
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test("layout file limit counts raw bytes and accepts exactly 64 KiB of UTF-8 JSON", async () => {
+  const dir = await mkdtemp("/tmp/crisp-layout-")
+  const file = `${dir}/layout.json`
+  const value = { sidebar: { sections: [{ title: "聯絡資訊", fields: [] }] } }
+  const json = JSON.stringify(value)
+  const padded = json + " ".repeat(65_536 - Buffer.byteLength(json))
+  try {
+    for (const text of [padded.slice(0, -1), padded]) {
+      await Bun.write(file, text)
+      expect(await loadLayout(file, {})).toEqual(parseLayout(value))
+    }
+    // The character count remains below the limit, but the byte count exceeds it.
+    await Bun.write(file, padded + " ")
+    await expect(loadLayout(file, {})).rejects.toThrow("exceeds 64 KiB")
+    // Overflow must be reported before decoding an incomplete multibyte character.
+    await Bun.write(file, " ".repeat(65_536) + "界")
+    await expect(loadLayout(file, {})).rejects.toThrow("exceeds 64 KiB")
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test("oversized sparse configuration is rejected before JSON parsing", async () => {
+  const dir = await mkdtemp("/tmp/crisp-layout-")
+  const file = `${dir}/large.json`
+  try {
+    const handle = await open(file, "w")
+    try { await handle.truncate(128 * 1024 * 1024) }
+    finally { await handle.close() }
+    await expect(loadLayout(file, {})).rejects.toThrow("exceeds 64 KiB")
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
