@@ -5,7 +5,7 @@ import { Store } from "./store"
 import { socketPath } from "./control"
 import { observeRealtime } from "./rtm-check"
 
-export async function liveReadonlyMain(args: string[]): Promise<number> {
+export async function liveReadonlyMain(args: string[], readCredentials = loadWebsiteCredentials): Promise<number> {
   const { values } = parseArgs({ args, options: {
     website: { type: "string" }, item: { type: "string" },
     check: { type: "boolean" }, help: { type: "boolean" },
@@ -18,7 +18,7 @@ export async function liveReadonlyMain(args: string[]): Promise<number> {
       if (!values.item?.trim()) throw new Error("Choose a 1Password item explicitly with --item ITEM")
       const timeout = values["rtm-timeout"] === undefined ? 0 : Number(values["rtm-timeout"])
       if (values["rtm-timeout"] !== undefined && (!values.check || !Number.isInteger(timeout) || timeout < 1 || timeout > 120)) throw new Error("--rtm-timeout requires check mode and 1–120 seconds")
-      const credentials = await loadWebsiteCredentials(values.item, values.website)
+      const credentials = await readCredentials(values.item, values.website)
       const websiteId = credentials.websiteId
       const session = credentialClient(credentials)
       const store = new Store(session.client)

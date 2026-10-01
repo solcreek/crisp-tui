@@ -42,7 +42,7 @@ export async function main(args: string[]) {
   }
   if (args[0] === "cli") {
     // Pass argv verbatim; crispctl owns API commands, credentials, JSON and exit codes.
-    return await Bun.spawn([...command(), ...args.slice(1)], { stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exited
+    return await Bun.spawn([...command(), ...args.slice(1)], { env: process.env, stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exited
   }
   let opts: ReturnType<typeof options>
   try { opts = options(args) } catch (e) { throw new CliError(e instanceof Error ? e.message : "Invalid arguments", 2) }

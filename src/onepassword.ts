@@ -9,8 +9,8 @@ export function websiteCredentials(item: Item, override?: string): WebsiteCreden
   if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(websiteId)) throw new Error("Provide --website with the Crisp workspace UUID")
   return { identifier, key, websiteId }
 }
-export async function loadWebsiteCredentials(item: string, websiteId?: string) {
-  const child = Bun.spawn(["op", "item", "get", item, "--format", "json"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+export async function loadWebsiteCredentials(item: string, websiteId?: string, executable = "op") {
+  const child = Bun.spawn([executable, "item", "get", item, "--format", "json"], { env: process.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
   const timer = setTimeout(() => child.kill(), 60_000)
   try {
     const [out, , status] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
