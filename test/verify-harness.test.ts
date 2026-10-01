@@ -38,8 +38,8 @@ test("one of two concurrent launches owns the run id", async () => {
     if (wins.length !== 1 || losses.length !== 1) {
       throw new Error(results.map(result => `code=${result.code}\n${result.stdout}\n${result.stderr}`).join("\n---\n"))
     }
-    const win = JSON.parse(wins[0]!.stdout) as { ok: boolean; source: string; activeSession: string; runId: string }
-    expect(win).toMatchObject({ ok: true, source: "DEMO · local only", activeSession: "session_demo_1", runId })
+    const win = JSON.parse(wins[0]!.stdout) as { ok: boolean; source: string; activeSession: string; runId: string; protocol: number }
+    expect(win).toMatchObject({ ok: true, source: "DEMO · local only", activeSession: "session_demo_1", runId, protocol: 2 })
     const loss = JSON.parse(losses[0]!.stdout) as { ok: boolean; error: string }
     expect(loss.ok).toBe(false)
     expect(loss.error).toContain(`Run directory already exists for ${runId}`)
