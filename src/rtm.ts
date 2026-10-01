@@ -69,6 +69,8 @@ export function listen(prefix: string[], flags: string[], env = process.env): Re
 export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock = systemClock): Cleanup {
   if (!store.client.subscribe) return () => {}
   let cancelTimer: (() => void) | undefined
+  let active = Promise.resolve()
+  const drained = Promise.withResolvers<void>()
   let running = false, dirty = false, stopped = false, last = 0
   const schedule = () => {
     if (stopped || running || cancelTimer) return
@@ -76,7 +78,7 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
       cancelTimer = undefined
       if (stopped) return
       dirty = false; running = true; last = clock.now()
-      void store.refreshAfterCurrent().catch(async error => {
+      active = store.refreshAfterCurrent().catch(async error => {
         if (!stopped) await store.perform(async () => { throw error })
       }).finally(() => {
         running = false
@@ -93,6 +95,7 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
     return Object.assign(() => {
       if (stopped) return
       stopped = true; cancelTimer?.(); stop()
-    }, { done: stop.done })
+      void Promise.all([active, stop.done]).then(() => drained.resolve(), drained.reject)
+    }, { done: drained.promise })
   } catch (error) { stopped = true; cancelTimer?.(); throw error }
 }

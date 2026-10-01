@@ -8,11 +8,14 @@ export function startUpdates(store: Store, pollMs: number, clock: Clock = system
   let stopped = false, failures = 0
   let cancelPoll: (() => void) | undefined
   let stopRealtime: Cleanup = () => {}
+  let active = Promise.resolve()
+  const drained = Promise.withResolvers<void>()
   const stop: Cleanup = () => {
     if (stopped) return
     stopped = true
     cancelPoll?.()
     stopRealtime()
+    void Promise.all([active, stopRealtime.done]).then(() => drained.resolve(), drained.reject)
   }
   const refresh = async () => {
     try { await store.refresh(); failures = 0 }
@@ -20,12 +23,12 @@ export function startUpdates(store: Store, pollMs: number, clock: Clock = system
       failures++
       if (!stopped) await store.perform(async () => { throw error })
     }
-    if (!stopped && pollMs) cancelPoll = clock.after(Math.min(pollMs * 2 ** failures, 900_000), () => { void refresh() })
+    if (!stopped && pollMs) cancelPoll = clock.after(Math.min(pollMs * 2 ** failures, 900_000), () => { active = refresh() })
   }
   try {
     stopRealtime = attachRealtime(store, 5000, clock)
-    stop.done = stopRealtime.done
-    void refresh()
+    stop.done = drained.promise
+    active = refresh()
     return stop
   } catch (error) { stop(); throw error }
 }

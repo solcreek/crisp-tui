@@ -27,13 +27,13 @@ test("TUI startup, socket drafts and renderer destruction share one lifecycle", 
   const path = await socket(), client = demoClient(), store = new Store(client)
   let stops = 0
   client.subscribe = () => () => { stops++ }
-  await startTui(store, path, 0, createRenderer)
+  const tui = await startTui(store, path, 0, createRenderer)
   await store.refresh()
   expect(await request(path, "draft", { session: "session_demo_2", text: "lifecycle draft" })).toMatchObject({ sent: false })
   await ui!.renderOnce()
   expect(ui!.captureCharFrame()).toContain("lifecycle draft")
   ui!.renderer.destroy()
-  for (let i = 0; i < 50 && await Bun.file(path).exists(); i++) await Bun.sleep(10)
+  await tui.stop()
   expect(stops).toBe(1)
   await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" })
 })

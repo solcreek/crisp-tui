@@ -94,3 +94,27 @@ test("RTM bursts and events during a read reconcile again after the minimum inte
   expect(clock.pending).toBe(0)
   expect(store.state.realtime).toBe("authenticated")
 })
+
+for (const source of ["poll", "rtm"] as const) test(`${source} shutdown waits for successful in-flight reads and leaves no work after done`, async () => {
+  const clock = new TestClock(), client = demoClient(), list = client.list
+  const release = Promise.withResolvers<void>()
+  let reads = 0
+  client.list = async (...args) => { reads++; await release.promise; return list(...args) }
+  if (source === "rtm") client.subscribe = (_, status) => { status({ state: "authenticated" }); return () => {} }
+  const store = new Store(client)
+  const stop = source === "poll" ? startUpdates(store, 60_000, clock) : attachRealtime(store, 5000, clock)
+  await clock.advance(200)
+  expect(reads).toBe(1)
+  stop()
+  let finished = false
+  const done = stop.done!.then(() => { finished = true })
+  await clock.flush()
+  expect(finished).toBe(false)
+  release.resolve(); await done
+  expect(store.state.active?.session_id).toBe("session_demo_1")
+  const revision = store.state.revision
+  await clock.advance(900_000)
+  expect(reads).toBe(1)
+  expect(store.state.revision).toBe(revision)
+  expect(clock.pending).toBe(0)
+})
