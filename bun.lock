@@ -5,7 +5,7 @@
     "": {
       "name": "crisp-tui",
       "dependencies": {
-        "crispctl": "0.4.0",
+        "crispctl": "0.5.0",
       },
       "devDependencies": {
         "@opentui/core": "0.5.12",
@@ -165,7 +165,7 @@
 
     "crisp-tui-linux-x64": ["crisp-tui-linux-x64@workspace:packages/linux-x64"],
 
-    "crispctl": ["crispctl@0.4.0", "", { "dependencies": { "commander": "15.0.0", "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-7quzhQBARiLwbkB7PWT5RirXi1A4q469T7GT6U3CsCLWxRKp/qqPhKw5iGVaYVc59uHZ5GY87fz3L3202w2bSQ=="],
+    "crispctl": ["crispctl@0.5.0", "", { "dependencies": { "commander": "15.0.0", "socket.io-client": "^4.8.4", "undici": "^6.21.2" }, "bin": { "crispctl": "dist/index.js" } }, "sha512-6AV6argLHfKjURNsHCSQ1JNHEBl60FLK6aBFMWfdp67vMr1YVNG6poNLRllUT6vMaPPcFYpWE/vwLaevkW2xhA=="],
 
     "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
