@@ -2,15 +2,16 @@
 const names = [
   "startup.entry", "startup.layout", "startup.credentials", "startup.auth", "startup.ui_import",
   "startup.socket", "startup.renderer", "startup.mount", "startup.first_frame", "startup.ready_frame",
-  "client.list", "client.get", "client.messages", "crispctl.parse",
+  "startup.content_frame", "startup.loaded_frame", "startup.synced_frame",
+  "client.list", "client.get", "client.messages", "client.refresh", "crispctl.parse",
   "subprocess.spawn", "subprocess.first_stdout", "subprocess.first_stderr", "subprocess.total",
   "state.notify", "state.reconcile", "cache.lookup", "cache.store", "details.project",
   "navigation.feedback_frame", "navigation.cached_frame", "navigation.cold_frame", "navigation.fresh_frame",
-  "render.frame", "render.native", "render.stdout", "render.state_to_frame", "rtm.authenticate",
+  "render.frame", "render.native", "render.stdout", "render.state_to_frame", "rtm.authenticate", "rtm.reconcile",
 ] as const
 export type MetricName = typeof names[number]
 const allowed = new Set<string>(names)
-const counterNames = ["cache.hit", "cache.miss", "navigation.superseded"] as const
+const counterNames = ["cache.hit", "cache.miss", "navigation.superseded", "reads.list_reused", "reads.details_reused", "reads.messages_reused"] as const
 type Counter = typeof counterNames[number]
 interface Samples { count: number; failures: number; totalMs: number; maxMs: number; samples: number[]; next: number }
 

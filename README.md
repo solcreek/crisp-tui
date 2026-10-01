@@ -173,13 +173,31 @@ credentials, session IDs, paths, message content or error text are included.
 
 | Metrics | What they measure |
 | --- | --- |
-| `startup.*` | Entry point, config, credentials/auth, UI import, socket, renderer, mount, first frame and first loaded frame |
-| `client.list/get/messages` | Complete read latency through crispctl, including subprocess startup and network |
+| `startup.*` | Entry point, config, credentials/auth, UI import, socket, renderer, mount and the frame milestones below |
+| `client.list/get/messages`, `client.refresh` | Individual read latency through crispctl and the complete refresh operation |
 | `subprocess.*`, `crispctl.parse` | Spawn, first stdout/stderr byte, completion and JSON parsing |
 | `state.*`, `cache.*`, `details.project` | Data reconciliation, synchronous UI notifications, snapshot access and sidebar projection |
 | `navigation.*` | Selection to feedback frame, cached/cold content frame and freshly loaded frame |
 | `render.*` | JS frame work, native rendering, backend output timing and state change to frame completion |
-| `rtm.authenticate` | Listener startup/reconnect to authenticated status |
+| `rtm.authenticate`, `rtm.reconcile` | Listener authentication and catch-up, including any wait for in-flight reads |
+
+Startup has distinct milestones, measured from process startup:
+
+- `startup.first_frame`: the first rendered UI, possibly still loading.
+- `startup.content_frame`: the first frame with the selected conversation's loaded
+  messages (including an empty history). It does not wait for sidebar details.
+- `startup.loaded_frame`: the first frame after a complete initial inbox and
+  selected-conversation snapshot has loaded successfully. An empty inbox also
+  completes this milestone. `startup.ready_frame` is a compatibility alias for it.
+- `startup.synced_frame`: the first frame after initial loading and successful
+  RTM catch-up. It stays absent when RTM is disabled or has not synchronized.
+
+A later background refresh cannot delay `loaded_frame`, and completion of only
+the inbox request cannot prematurely satisfy `synced_frame`. Counters
+`reads.list_reused`, `reads.details_reused` and `reads.messages_reused` identify
+catch-up requests avoided because a successful read already covers the observed
+event/authentication boundary. Reconnects and events during a read still require
+reads started after that boundary; failed or superseded reads never qualify.
 
 All durations are milliseconds. Counts, mean and max cover the process lifetime;
 p50/p95 use the most recent 256 samples per metric. Startup frame milestones use
@@ -229,6 +247,10 @@ a loading indicator immediately. The per-session cache holds at most twenty
 conversations and 8 MiB of serialized data, evicts the least recently viewed
 entries, and is never written to disk. Acknowledged writes invalidate the affected
 snapshot. Repeated selections while the same conversation loads share its request.
+Messages and sidebar details appear independently as their requests complete;
+failure of one retains the other. Only complete successful snapshots enter the
+cache. RTM catch-up reuses qualifying in-flight reads instead of always repeating
+the entire inbox and conversation fetch.
 
 | Key | Action |
 | --- | --- |
@@ -347,6 +369,9 @@ length/note mode, error source and status. `conversationCached` identifies a sav
 snapshot awaiting successful revalidation. It does not embed message histories or
 all draft text. `goto` and `refresh` return the same compact state. `draft` returns
 `{session, draft: {note, length}, revision, sent: false}` without echoing the text.
+`messagesReady`, `messagesLoading` and `detailsLoading` describe independent
+resource loading; `initialReadComplete` is the startup milestone and
+`realtimeSynced` indicates that the latest RTM observation has been reconciled.
 
 `messages`, `conversations` and `drafts` return
 `{revision, session, items, total, offset, nextOffset}` from locally loaded data.

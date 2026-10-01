@@ -18,6 +18,11 @@ export interface State {
   selectedSession: string | null
   conversationLoading: boolean
   conversationCached: boolean
+  messagesReady: boolean
+  messagesLoading: boolean
+  detailsLoading: boolean
+  initialReadComplete: boolean
+  realtimeSynced: boolean
   realtime: "off" | "connecting" | "authenticated" | "reconnecting" | "error"
   source: string; conversations: Conversation[]; active: Conversation | null; messages: Message[]
   drafts: Record<string, Draft>; query: string; page: number; loading: boolean; sending: boolean
@@ -33,12 +38,16 @@ export class Store {
   private listing = 0
   private mutationVersion = 0
   private messageVersion = 0
+  private conversationRequest = 0
   private refreshTask?: Promise<void>
   private cache = new ConversationCache()
   private openTask?: { session: string; promise: Promise<void> }
+  private readEpoch = 0
+  private listRead?: { epoch: number; query: string; page: number }
+  private conversationRead?: { session: string; details: number; messages: number }
   constructor(readonly client: CrispClient, readonly metrics: Metrics = defaultMetrics) {
     if (client.readOnly) this.client = readOnlyClient(client)
-    this.state = { selectedSession: null, conversationLoading: false, conversationCached: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", errorSource: null, status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
+    this.state = { selectedSession: null, conversationLoading: false, conversationCached: false, messagesReady: false, messagesLoading: false, detailsLoading: false, initialReadComplete: false, realtimeSynced: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", errorSource: null, status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
   }
   subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   update(patch: Partial<State>) {
@@ -70,7 +79,7 @@ export class Store {
   }
   setRealtime(status: RealtimeStatus) {
     const operation = this.operation("realtime")
-    this.update({ realtime: status.state })
+    this.update({ realtime: status.state, ...(status.state !== "authenticated" ? { realtimeSynced: false } : {}) })
     if (status.message) this.reportError(operation.failure(status.message))
     else if (status.state === "authenticated") operation.clear()
   }
@@ -84,10 +93,12 @@ export class Store {
     try {
       while (version === this.listing) {
         const mutation = this.mutationVersion
+        const epoch = this.readEpoch
         const conversations = await this.metrics.measure("client.list", () => this.client.list(page, query))
         if (version !== this.listing) return
         // A completed write invalidates any list requested before its acknowledgement.
         if (mutation !== this.mutationVersion) continue
+        this.listRead = { epoch, query, page }
         this.update({ conversations: this.metrics.sync("state.reconcile", () => reuseRecords(this.state.conversations, conversations, c => c.session_id)) })
         operation.clear()
         return
@@ -124,13 +135,14 @@ export class Store {
     const operation = this.operation("conversation", () => version === this.selection)
     // Selection is an intent; it survives while the matching data is loading.
     const cached = this.metrics.sync("cache.lookup", () => this.cache.get(session))
+    this.conversationRead = { session, details: -1, messages: -1 }
     this.metrics.increment(cached ? "cache.hit" : "cache.miss")
-    this.update({ selectedSession: session, conversationLoading: true, conversationCached: !!cached, active: cached?.active ?? null,
+    this.update({ selectedSession: session, conversationLoading: true, conversationCached: !!cached, messagesReady: !!cached, active: cached?.active ?? null,
       messages: cached?.messages ?? [], status: cached ? "Showing saved conversation · updating…" : "Loading conversation…" })
     try {
       while (version === this.selection) {
         const mutation = this.mutationVersion
-        const [active, messages] = await this.fetchConversation(session)
+        const [active, messages] = await this.fetchConversation(session, () => version === this.selection && mutation === this.mutationVersion)
         if (version !== this.selection) return
         if (mutation !== this.mutationVersion) continue
         const snapshot = this.saveConversation(active, messages)
@@ -144,7 +156,11 @@ export class Store {
         throw operation.failure(error)
       }
     } finally {
-      if (version === this.selection) this.update({ conversationLoading: false })
+      if (version === this.selection) {
+        this.update({ conversationLoading: false })
+        this.markInitialReadComplete()
+        this.markRealtimeSynced()
+      }
     }
   }
   draft(): Draft { return this.state.drafts[this.state.active?.session_id ?? ""] ?? { text: "", note: false } }
@@ -212,21 +228,53 @@ export class Store {
     this.metrics.sync("cache.store", () => this.cache.set(snapshot.active, snapshot.messages))
     return snapshot
   }
-  private fetchConversation(session: string) {
-    return Promise.all([
-      this.metrics.measure("client.get", () => this.client.get(session)),
-      this.metrics.measure("client.messages", () => this.client.messages(session)),
+  private async fetchConversation(session: string, current: () => boolean, requiredEpoch?: number): Promise<[Conversation, Message[]]> {
+    const request = ++this.conversationRequest
+    const previous = this.conversationRead?.session === session ? this.conversationRead : undefined
+    const details = requiredEpoch === undefined || !this.state.active || !previous || previous.details < requiredEpoch
+    const messages = requiredEpoch === undefined || !this.state.messagesReady || !previous || previous.messages < requiredEpoch
+    if (!details) this.metrics.increment("reads.details_reused")
+    if (!messages) this.metrics.increment("reads.messages_reused")
+    const epoch = this.readEpoch
+    this.update({ detailsLoading: details, messagesLoading: messages })
+    const accept = (part: "details" | "messages") => {
+      if (!this.conversationRead || this.conversationRead.session !== session) this.conversationRead = { session, details: -1, messages: -1 }
+      this.conversationRead[part] = epoch
+    }
+    // Each successful resource becomes visible independently. Await both outcomes
+    // before caching a complete snapshot or reporting the operation's failure.
+    const outcomes = await Promise.allSettled([
+      details ? this.metrics.measure("client.get", () => this.client.get(session)).then(active => {
+        if (current()) {
+          accept("details")
+          this.update({ active: this.metrics.sync("state.reconcile", () => reuseRecord(this.state.active, active)), detailsLoading: false })
+        }
+        return active
+      }).finally(() => { if (current() && this.state.detailsLoading) this.update({ detailsLoading: false }) }) : Promise.resolve(this.state.active!),
+      messages ? this.metrics.measure("client.messages", () => this.client.messages(session)).then(items => {
+        if (current()) {
+          accept("messages")
+          this.update({ messages: this.metrics.sync("state.reconcile", () => reuseRecords(this.state.messages, items, m => m.fingerprint)), messagesReady: true, messagesLoading: false })
+        }
+        return items
+      }).finally(() => { if (current() && this.state.messagesLoading) this.update({ messagesLoading: false }) }) : Promise.resolve(this.state.messages),
     ])
+    if (request === this.conversationRequest && this.state.selectedSession === session && (this.state.detailsLoading || this.state.messagesLoading)) {
+      this.update({ detailsLoading: false, messagesLoading: false })
+    }
+    if (outcomes[0].status === "rejected") throw outcomes[0].reason
+    if (outcomes[1].status === "rejected") throw outcomes[1].reason
+    return [outcomes[0].value, outcomes[1].value]
   }
-  private async refreshMessages() {
-    const id = this.state.active?.session_id
+  private async refreshMessages(requiredEpoch?: number) {
+    const id = this.state.selectedSession
     const version = this.selection
     if (!id) return
     const messageVersion = ++this.messageVersion
     const current = () => version === this.selection && messageVersion === this.messageVersion
     const operation = this.operation("conversation", current)
     try {
-      const [active, messages] = await this.fetchConversation(id)
+      const [active, messages] = await this.fetchConversation(id, current, requiredEpoch)
       if (current()) {
         const snapshot = this.saveConversation(active, messages)
         this.update({ ...snapshot, conversationCached: false,
@@ -235,20 +283,50 @@ export class Store {
       }
     } catch (error) { if (current()) throw operation.failure(error) }
   }
-  refresh(): Promise<void> {
+  refresh(requiredEpoch?: number): Promise<void> {
     if (this.refreshTask) return this.refreshTask
-    this.refreshTask = (async () => {
-      await this.fetchList(this.state.query, this.state.page)
+    this.refreshTask = this.metrics.measure("client.refresh", async () => {
+      if (requiredEpoch === undefined || !this.listFresh(requiredEpoch)) await this.fetchList(this.state.query, this.state.page)
+      else this.metrics.increment("reads.list_reused")
       if (!await this.selectInitialConversation() && !this.state.conversationLoading) {
-        if (!this.state.active && this.state.selectedSession) await this.open(this.state.selectedSession)
-        else await this.refreshMessages()
+        await this.refreshMessages(requiredEpoch)
       }
-    })().finally(() => { this.refreshTask = undefined })
+      this.markInitialReadComplete()
+      this.markRealtimeSynced()
+    }).finally(() => { this.refreshTask = undefined })
     return this.refreshTask
   }
-  async refreshAfterCurrent() {
-    if (this.refreshTask) await this.refreshTask.catch(() => {})
-    return this.refresh()
+  private listFresh(epoch: number) {
+    return !!this.listRead && this.listRead.epoch >= epoch && this.listRead.query === this.state.query && this.listRead.page === this.state.page
+  }
+  private markInitialReadComplete() {
+    const s = this.state, read = this.conversationRead
+    if (s.initialReadComplete || !this.listFresh(0) || s.conversationLoading || s.messagesLoading || s.detailsLoading) return
+    if ((!s.selectedSession && !s.conversations.length) ||
+      (s.active?.session_id === s.selectedSession && s.messagesReady && read?.session === s.selectedSession && read.details >= 0 && read.messages >= 0)) {
+      this.update({ initialReadComplete: true })
+    }
+  }
+  private markRealtimeSynced() {
+    const s = this.state, read = this.conversationRead, epoch = this.readEpoch
+    if (!epoch || s.realtime !== "authenticated" || s.realtimeSynced || s.conversationLoading || s.detailsLoading || s.messagesLoading) return
+    if (this.listFresh(epoch) && (!s.selectedSession ||
+      (read?.session === s.selectedSession && read.details >= epoch && read.messages >= epoch))) this.update({ realtimeSynced: true })
+  }
+  /** Capture the observation boundary now, not after a debounce or in-flight read. */
+  invalidateReads() {
+    const epoch = ++this.readEpoch
+    this.update({ realtimeSynced: false })
+    return epoch
+  }
+  async refreshAfterCurrent(epoch = this.invalidateReads(), stopped = () => false) {
+    while (this.refreshTask || this.openTask) {
+      await (this.refreshTask ?? this.openTask!.promise).catch(() => {})
+      if (stopped()) return
+    }
+    if (stopped()) return
+    await this.refresh(epoch)
+    if (!stopped()) this.markRealtimeSynced()
   }
   screen() {
     const s = this.state

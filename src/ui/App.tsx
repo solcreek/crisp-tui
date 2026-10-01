@@ -120,7 +120,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
           <text fg={color.dim} truncate wrapMode="none">{clean([selected()?.meta?.email, ...(selected()?.meta?.segments || [])].filter(Boolean).join(" · "))}</text>
         </box>
         <scrollbox ref={history} flexGrow={1} minHeight={0} stickyScroll stickyStart="bottom" border={pane() === "messages" ? ["left"] : undefined} borderColor={color.blue} paddingLeft={2} paddingRight={2}>
-          <Show when={state().conversationLoading && !state().active}><text fg={color.dim} marginTop={1}>Loading messages…</text></Show>
+          <Show when={state().messagesLoading && !state().messagesReady}><text fg={color.dim} marginTop={1}>Loading messages…</text></Show>
           <For each={state().messages}>{m => <box flexDirection="column" flexShrink={0} marginTop={1} marginBottom={1}>
             <text fg={m.type === "note" ? color.note : m.from === "operator" ? color.blue : color.green}>
               <b>{clean(m.user?.nickname || (m.from === "operator" ? "Operator" : "Visitor"))}</b>
@@ -129,7 +129,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
             </text>
             <text fg={color.fg} wrapMode="word">{messageText(m)}</text>
           </box>}</For>
-          <Show when={state().active && !state().messages.length}><text fg={color.dim} marginTop={1}>No messages.</text></Show>
+          <Show when={state().messagesReady && !state().messages.length}><text fg={color.dim} marginTop={1}>No messages.</text></Show>
         </scrollbox>
         <Show when={!state().readOnly} fallback={<text height={2} paddingLeft={2} fg={color.note}>Read only · sending and conversation changes disabled</text>}>
         <box flexShrink={0} minHeight={5} maxHeight={10} marginLeft={1} marginRight={1} border borderStyle="rounded"
@@ -154,7 +154,8 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
       </box>
       <Show when={showDetails()}>
         <DetailsPanel width={sidebar().width} focused={pane() === "details"} groups={groups()}
-          loading={state().conversationLoading} selected={!!state().active}
+          loading={state().detailsLoading} selected={!!state().active}
+          unavailable={!!state().selectedSession && !state().active}
           bindScroll={value => { details = value }} focus={() => setPane("details")} />
       </Show>
     </box>

@@ -78,13 +78,14 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
   let active = Promise.resolve()
   const drained = Promise.withResolvers<void>()
   let running = false, dirty = false, stopped = false, last = 0
+  let epoch = 0
   const schedule = () => {
     if (stopped || running || cancelTimer) return
     cancelTimer = clock.after(Math.max(200, minRefreshMs - (clock.now() - last)), () => {
       cancelTimer = undefined
       if (stopped) return
       dirty = false; running = true; last = clock.now()
-      active = store.refreshAfterCurrent().catch(async error => {
+      active = store.metrics.measure("rtm.reconcile", () => store.refreshAfterCurrent(epoch, () => stopped)).catch(async error => {
         if (!stopped) await store.perform(async () => { throw error })
       }).finally(() => {
         running = false
@@ -93,10 +94,11 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
     })
   }
   try {
-    const stop = store.client.subscribe(() => { if (!stopped) { dirty = true; schedule() } }, status => {
+    const invalidate = () => { epoch = store.invalidateReads(); dirty = true; schedule() }
+    const stop = store.client.subscribe(() => { if (!stopped) invalidate() }, status => {
       if (stopped) return
       store.setRealtime(status)
-      if (status.state === "authenticated") { dirty = true; schedule() }
+      if (status.state === "authenticated") invalidate()
     })
     return Object.assign(() => {
       if (stopped) return

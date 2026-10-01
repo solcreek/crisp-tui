@@ -12,6 +12,8 @@ export function controlState(store: Store) {
   // Protocol 2 is deliberately independent of internal State and never embeds histories or draft text.
   return { protocol: 2, revision: s.revision, source: preview(s.source), readOnly: s.readOnly,
     selectedSession: s.selectedSession, conversationLoading: s.conversationLoading, conversationCached: s.conversationCached,
+    messagesReady: s.messagesReady, messagesLoading: s.messagesLoading, detailsLoading: s.detailsLoading,
+    initialReadComplete: s.initialReadComplete, realtimeSynced: s.realtimeSynced,
     active: s.active ? conversation(s.active) : null, realtime: s.realtime,
     query: preview(s.query), page: s.page, loading: s.loading, sending: s.sending,
     counts: { conversations: s.conversations.length, messages: s.messages.length, drafts: Object.keys(s.drafts).length },
@@ -53,7 +55,7 @@ export function controlPage(store: Store, resource: "conversations" | "messages"
     }
     items.push(item); bytes += size
   }
-  return { revision: s.revision, session: s.active?.session_id ?? null, items, total: rows.length,
+  return { revision: s.revision, session: s.selectedSession, items, total: rows.length,
     offset, nextOffset: offset + items.length < rows.length ? offset + items.length : null }
 }
 /** Read lossless JSON in bounded UTF-16 slices, without changing the selected conversation. */
