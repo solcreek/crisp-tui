@@ -35,6 +35,9 @@ for (const target of targets) test(`${target}: PTY TUI and separate ctl process 
     throw new Error(`Timed out: ${label}\n${screen.slice(-2000)}`)
   }
   try {
+    // Let npx finish installing and launch the TUI before another npx process
+    // touches the same cache to send control commands.
+    await until(async () => screen.includes("support inbox"), "TUI rendered")
     await until(async () => !!(await ctl("state")).active, "startup")
     const draft = await ctl("draft", "session_demo_2", "PTY agent proposal", "--note")
     expect(draft.sent).toBe(false)
