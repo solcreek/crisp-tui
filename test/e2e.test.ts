@@ -11,14 +11,16 @@ const targets = process.env.CRISP_TUI_TEST_INSTALLED_ONLY ? ["installed"]
 for (const target of targets) test(`${target}: PTY TUI and separate ctl process share drafts, send, and shut down cleanly`, async () => {
   const dir = await mkdtemp("/tmp/otc-e2e-")
   const path = join(dir, "control.sock")
+  const config = join(dir, "layout.json")
+  await Bun.write(config, JSON.stringify({ sidebar: { sections: [{ title: "Account", fields: [{ label: "Subscription", path: ["meta", "data", "plan"] }] }] } }))
   const argv: string[] = target === "installed" ? (process.env.CRISP_TUI_TEST_ARGV ? JSON.parse(process.env.CRISP_TUI_TEST_ARGV) : [resolve(installed!)]) : target === "binary"
     ? [binary]
     : [process.execPath, resolve(import.meta.dir, "../src/index.ts")]
   const env = { ...process.env, CRISP_TUI_SOCKET: path, TERM: "xterm-256color" }
   let screen = ""
-  const child = Bun.spawn([...argv, "--demo", "--poll", "0"], {
+  const child = Bun.spawn([...argv, "--demo", "--poll", "0", "--config", config], {
     env, cwd: target === "installed" ? dir : undefined,
-    terminal: { cols: 100, rows: 30, data: (_, data) => { screen += new TextDecoder().decode(data) } },
+    terminal: { cols: 140, rows: 30, data: (_, data) => { screen += new TextDecoder().decode(data) } },
   })
   async function ctl(...args: string[]) {
     const process = Bun.spawn([...argv, "ctl", ...args], { env, cwd: target === "installed" ? dir : undefined, stdout: "pipe", stderr: "pipe" })
@@ -39,8 +41,11 @@ for (const target of targets) test(`${target}: PTY TUI and separate ctl process 
     // touches the same cache to send control commands.
     await until(async () => screen.includes("support inbox"), "TUI rendered")
     await until(async () => !!(await ctl("state")).active, "startup")
+    await until(async () => screen.includes("Subscription"), "configured sidebar rendered")
+    expect(await ctl("details")).toMatchObject({ session: "session_demo_1", sections: [{ title: "Account", rows: [{ label: "Subscription", value: "Team" }] }] })
     const draft = await ctl("draft", "session_demo_2", "PTY agent proposal", "--note")
     expect(draft.sent).toBe(false)
+    expect(await ctl("details")).toMatchObject({ session: "session_demo_2", sections: [{ rows: [{ value: "Starter" }] }] })
     const state = await ctl("state")
     expect(state.protocol).toBe(2)
     const record = await ctl("read", "drafts", "session_demo_2", "--revision", String(state.revision))

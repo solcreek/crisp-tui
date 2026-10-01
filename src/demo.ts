@@ -6,6 +6,9 @@ export function demoClient(): CrispClient {
     { session_id: "session_demo_2", state: "unresolved", meta: { nickname: "Demo Customer B", email: "customer-b@example.com", segments: ["onboarding"] }, last_message: "How do I invite my teammates?", unread: { operator: 2 } },
     { session_id: "session_demo_3", state: "resolved", meta: { nickname: "Demo Customer C", segments: ["feedback"] }, last_message: "That worked. Thank you!" },
   ]
+  conversations[0]!.meta!.data = { plan: "Team", "member-since": "2025-04-15", region: "US" }
+  conversations[0]!.meta!.device = { geolocation: { city: "Portland", country: "US" }, system: { browser: { name: "Firefox" }, os: { name: "Linux" } }, locales: ["en-US"] }
+  conversations[1]!.meta!.data = { plan: "Starter", seats: 3, trial: true }
   const histories: Record<string, Message[]> = Object.fromEntries(conversations.map((c, i) => [c.session_id, [
     { fingerprint: i + 1, timestamp: Date.now() - 60_000, from: "user", type: "text", content: c.last_message, user: { nickname: c.meta?.nickname } },
   ]]))

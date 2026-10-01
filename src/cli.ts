@@ -1,3 +1,4 @@
+import { loadLayout } from "./layout"
 import { parseArgs } from "node:util"
 import { command, createClient, runner, CliError } from "./crispctl"
 import { demoClient } from "./demo"
@@ -9,13 +10,13 @@ import { controlHelp, parseControlCommand } from "./commands"
 
 export const help = `crisp-tui — Crisp inbox for people and agents
 
-  crisp-tui [tui] [--demo] [--read-only] [--profile sandbox] [--website ID]
+  crisp-tui [tui] [--demo] [--read-only] [--profile sandbox] [--website ID] [--config FILE]
 ${controlHelp.map(line => `  crisp-tui ${line}`).join("\n")}
   crisp-tui cli <crispctl arguments...>
   crisp-tui live --item ITEM [--website ID]    # read-only TUI using 1Password
   crisp-tui check --item ITEM [--website ID]   # bounded read-only connection check
 
-TUI: Tab cycles panes; / searches; Ctrl+N toggles reply/note;
+TUI: Ctrl+B toggles details; Tab cycles panes; / searches; Ctrl+N toggles reply/note;
      Ctrl+R refreshes; Ctrl+E resolves/reopens; Ctrl+U marks read;
      [ / ] pages inbox; Enter sends in composer; Ctrl+C quits.
 Global control/TUI options: --profile, --website. --poll SECONDS (default 60;
@@ -27,6 +28,7 @@ Exit codes: 0 success, 1 operation error, 2 usage, 3 no running TUI.
 
 export function options(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
+    config: { type: "string" },
     demo: { type: "boolean" }, "read-only": { type: "boolean" }, profile: { type: "string", default: process.env.CRISPCTL_PROFILE || "sandbox" },
     website: { type: "string" }, poll: { type: "string", default: "60" },
     offset: { type: "string" }, limit: { type: "string" }, revision: { type: "string" },
@@ -51,7 +53,7 @@ export async function main(args: string[]) {
   const [mode, verb, ...rest] = opts.positionals
   const path = socketPath(opts.profile, opts.website)
   if (mode === "ctl") {
-    if (opts.demo || opts["read-only"] || opts.poll !== 60) throw new CliError("--demo, --read-only and --poll are TUI options", 2)
+    if (opts.demo || opts["read-only"] || opts.poll !== 60 || opts.config !== undefined) throw new CliError("--demo, --read-only, --poll and --config are TUI options", 2)
     let parsed: ReturnType<typeof parseControlCommand>
     try { parsed = parseControlCommand(verb, rest, opts) }
     catch (error) { throw new CliError(error instanceof Error ? error.message : "Invalid control arguments", 2) }
@@ -61,6 +63,7 @@ export async function main(args: string[]) {
   }
   if ((mode && mode !== "tui") || verb || rest.length || opts.note || opts.replace || opts.offset !== undefined || opts.limit !== undefined || opts.revision !== undefined) throw new CliError("Unknown command or option. Use --help; API commands go after 'cli'.", 2)
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new CliError("The TUI needs an interactive terminal. Use ctl or cli for agent workflows.", 2)
+  const layout = await loadLayout(opts.config)
   const readOnly = opts["read-only"] || process.env.CRISPCTL_READ_ONLY === "1"
   let client
   if (opts.demo) client = demoClient()
@@ -73,7 +76,7 @@ export async function main(args: string[]) {
     if (auth.key !== "set" || !auth.identifier || !auth.website_id) throw new Error("Incomplete crispctl website credentials. See README.md.")
     client = createClient(run, `${opts.profile} · website ${auth.website_id}`, listen(prefix, flags))
   }
-  await (await import("./tui")).startTui(new Store(readOnly ? readOnlyClient(client) : client), path, opts.poll * 1000)
+  await (await import("./tui")).startTui(new Store(readOnly ? readOnlyClient(client) : client), path, opts.poll * 1000, undefined, layout)
   return 0
 }
 export function exitCode(error: unknown) { return error instanceof NotRunning ? 3 : error instanceof CliError ? error.code : 1 }

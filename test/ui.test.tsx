@@ -123,3 +123,43 @@ test("keyboard note, state, read and refresh shortcuts operate on the active con
   await frame("A remote update")
   expect(store.draft()).toEqual({ text: "Saved draft", note: true })
 })
+
+test("details follow selection, toggle without losing drafts, and adapt to terminal resizing", async () => {
+  const store = new Store(demoClient())
+  await store.refresh(); store.setDraft("Preserve this draft")
+  ui = await testRender(() => <App store={store} />, { width: 140, height: 50 })
+  await frame("DETAILS", "Portland", "Custom data", "Team")
+  ui.mockInput.pressKey("b", { ctrl: true })
+  await frame("Preserve this draft")
+  expect(ui.captureCharFrame()).not.toContain("DETAILS")
+  ui.mockInput.pressKey("b", { ctrl: true })
+  await frame("DETAILS", "Portland")
+  await store.open("session_demo_2")
+  await frame("Starter")
+  expect(ui.captureCharFrame()).not.toContain("Portland")
+  ui.resize(90, 30)
+  await frame("Demo Customer B")
+  expect(ui.captureCharFrame()).not.toContain("DETAILS")
+  ui.resize(140, 50)
+  await frame("DETAILS", "Starter")
+  await store.open("session_demo_1")
+  await frame("Preserve this draft", "Team")
+})
+
+test("custom details show chosen fields and clear old values while navigation loads", async () => {
+  const { parseLayout } = await import("../src/layout")
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const layout = parseLayout({ sidebar: { width: 28, sections: [{ title: "Account", fields: [{ label: "Subscription", path: ["meta", "data", "plan"] }] }] } })
+  ui = await testRender(() => <App store={store} layout={layout} />, { width: 130, height: 30 })
+  await frame("Account", "Subscription", "Team")
+  const get = client.get, release = Promise.withResolvers<void>()
+  client.get = async id => { await release.promise; return get(id) }
+  const opening = store.open("session_demo_2")
+  try {
+    await frame("Loading details…")
+    expect(ui.captureCharFrame()).not.toContain("Subscription")
+    expect(ui.captureCharFrame()).not.toContain("Team")
+  } finally { release.resolve(); await opening }
+  await frame("Subscription", "Starter")
+})

@@ -9,7 +9,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const DEMO_SOURCE = "DEMO · local only"
-const PROTOCOL = 1
+const PROTOCOL = 2
 const COLS = 100
 const ROWS = 30
 const READY_MS = 10_000

@@ -1,7 +1,7 @@
 export interface Conversation {
   session_id: string
   state?: string
-  meta?: { nickname?: string; email?: string; segments?: string[] }
+  meta?: { nickname?: string; email?: string; segments?: string[]; [key: string]: unknown }
   last_message?: string
   unread?: { operator?: number }
   updated_at?: number

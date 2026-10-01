@@ -52,7 +52,7 @@ bun .cursor/skills/verify-crisp-tui/harness.ts doctor
 Stdout is one JSON object. Exit 0 only when `"ok":true`. Require all of these:
 
 - `source` is `DEMO · local only`
-- `protocol` is `1`
+- `protocol` is `2`
 - `readOnly` is false
 - `realtime` is `off`
 - `socket` is `/tmp/crisp-tui-verify/<runId>/control.sock`
