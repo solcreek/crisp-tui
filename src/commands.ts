@@ -1,3 +1,5 @@
+import { defaultLayout, type LayoutConfig } from "./layout"
+import { conversationDetails } from "./details"
 import type { Store } from "./store"
 import { controlPage, controlRead, controlScreen, controlState, type PageOptions } from "./control-view"
 
@@ -8,13 +10,17 @@ interface Command {
   mode: "snapshot" | "action"
   allowedInReadOnly: boolean
   output: "json" | "text"
-  execute: (store: Store, params: Params, focus: () => void, check: () => void) => unknown
+  execute: (store: Store, params: Params, focus: () => void, check: () => void, layout: LayoutConfig) => unknown
 }
 
 const pageFields = { offset: "integer", limit: "integer", revision: "integer" } as const
 
 /** CLI syntax, socket validation, permissions and execution share this registry. */
 export const commands: Readonly<Record<string, Command>> = {
+  details: { fields: {}, mode: "snapshot", allowedInReadOnly: true, output: "json", execute: (store, _params, _focus, _check, layout) => ({
+    revision: store.state.revision, session: store.state.active?.session_id ?? null,
+    sections: conversationDetails(store.state.active, layout.sidebar),
+  }) },
   state: { fields: {}, mode: "snapshot", allowedInReadOnly: true, output: "json", execute: store => controlState(store) },
   screen: { fields: {}, mode: "snapshot", allowedInReadOnly: true, output: "text", execute: store => controlScreen(store) },
   conversations: { fields: pageFields, mode: "snapshot", allowedInReadOnly: true, output: "json", execute: (store, params) => controlPage(store, "conversations", params as PageOptions) },
@@ -87,7 +93,7 @@ export function parseControlCommand(method: string | undefined, args: string[], 
   return { method, ...validateCommand(method, params) }
 }
 
-export function controller(store: Store, focus: () => void = () => {}) {
+export function controller(store: Store, focus: () => void = () => {}, layout: LayoutConfig = defaultLayout) {
   let pending = Promise.resolve<unknown>(null)
   let queued = 0
   return async (method: string, input: Params, context: CommandContext = {}) => {
@@ -100,7 +106,7 @@ export function controller(store: Store, focus: () => void = () => {}) {
     const execute = () => {
       check()
       if (store.state.readOnly && !command.allowedInReadOnly) throw new Error("Read-only mode: agent drafts are disabled")
-      return command.execute(store, params, focus, check)
+      return command.execute(store, params, focus, check, layout)
     }
     // Snapshots remain available while screen-changing actions wait on I/O.
     if (command.mode === "snapshot") return execute()

@@ -2,12 +2,15 @@ import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
 import type { Store } from "../store"
+import { defaultLayout, type LayoutConfig } from "../layout"
+import { conversationDetails } from "../details"
+import { DetailsPanel } from "./DetailsPanel"
 import { clean, label, messageText } from "../types"
 
 const color = { bg: "#111823", panel: "#182333", fg: "#dbe7f7", dim: "#8799b2", blue: "#54a5ff", line: "#2b3d54", green: "#6ad6b1", note: "#f0c36a", error: "#ff929b" }
-type Pane = "inbox" | "messages" | "composer" | "search"
+type Pane = "inbox" | "messages" | "composer" | "search" | "details"
 
-export function App(props: { store: Store; bindFocus?: (fn: () => void) => void }) {
+export function App(props: { store: Store; bindFocus?: (fn: () => void) => void; layout?: LayoutConfig }) {
   const store = props.store
   const [state, setState] = createSignal(store.state)
   const unsubscribe = store.subscribe(() => setState(store.state))
@@ -16,6 +19,12 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
   const [cursor, setCursor] = createSignal(0)
   const [query, setQuery] = createSignal("")
   const dims = useTerminalDimensions()
+  const sidebar = () => (props.layout ?? defaultLayout).sidebar
+  const [detailsEnabled, setDetailsEnabled] = createSignal(sidebar().enabled)
+  const showDetails = () => detailsEnabled() && dims().width >= 84 + sidebar().width
+  const groups = () => conversationDetails(state().active, sidebar())
+  let details: ScrollBoxRenderable | undefined
+  createEffect(() => { if (!showDetails() && pane() === "details") setPane("messages") })
   let textarea: TextareaRenderable | undefined
   let history: ScrollBoxRenderable | undefined
   let inbox: ScrollBoxRenderable | undefined
@@ -38,6 +47,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
   const open = (id: string) => run(async () => { await store.open(id); setPane(state().readOnly ? "messages" : "composer") })
   useKeyboard(key => {
     if (key.ctrl) {
+      if (key.name === "b") { key.preventDefault(); setDetailsEnabled(value => !value); return }
       if (key.name === "r") { key.preventDefault(); run(() => store.refresh()); return }
       if (key.name === "n") { key.preventDefault(); if (state().active && !state().sending && !state().readOnly) store.setDraft(draft().text, !draft().note); return }
       if (key.name === "e") { key.preventDefault(); run(() => store.changeState()); return }
@@ -47,6 +57,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
     if (key.name === "tab") {
       key.preventDefault()
       const order: Pane[] = state().readOnly ? ["inbox", "messages"] : ["inbox", "messages", "composer"]
+      if (showDetails()) order.push("details")
       setPane(order[(order.indexOf(pane()) + (key.shift ? order.length - 1 : 1)) % order.length]!)
       return
     }
@@ -61,6 +72,10 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
         const c = state().conversations[cursor()]
         if (c) open(c.session_id)
       }
+    }
+    if (pane() === "details") {
+      if (["down", "j", "pagedown"].includes(key.name)) details?.scrollBy(key.name === "pagedown" ? 10 : 1)
+      if (["up", "k", "pageup"].includes(key.name)) details?.scrollBy(key.name === "pageup" ? -10 : -1)
     }
     if (pane() === "messages") {
       if (["down", "j", "pagedown"].includes(key.name)) history?.scrollBy(key.name === "pagedown" ? 10 : 1)
@@ -131,8 +146,13 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
         </box>
         </Show>
       </box>
+      <Show when={showDetails()}>
+        <DetailsPanel width={sidebar().width} focused={pane() === "details"} groups={groups()}
+          loading={state().conversationLoading} selected={!!state().active}
+          bindScroll={value => { details = value }} focus={() => setPane("details")} />
+      </Show>
     </box>
     <text height={1} flexShrink={0} paddingLeft={1} fg={state().error ? color.error : color.dim} truncate wrapMode="none">{state().error || state().status}</text>
-    <text height={1} flexShrink={0} paddingLeft={1} fg={color.dim} bg={color.panel} truncate wrapMode="none">{state().readOnly ? "Tab panes · / search · ^R refresh · ^C quit · READ ONLY" : "Tab panes · / search · ^R refresh · ^E resolve/reopen · ^U read · ^C quit"}</text>
+    <text height={1} flexShrink={0} paddingLeft={1} fg={color.dim} bg={color.panel} truncate wrapMode="none">{state().readOnly ? "Tab panes · / search · ^R refresh · ^B details · ^C quit · READ ONLY" : "Tab panes · / search · ^R refresh · ^E resolve/reopen · ^U read · ^B details · ^C quit"}</text>
   </box>
 }

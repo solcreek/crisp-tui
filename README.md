@@ -11,10 +11,11 @@ agents use JSON commands and can prepare drafts in the same running screen.
 access. Both profile-based and 1Password sessions use its JSON interface;
 this project has no separate HTTP or Socket.IO implementation.
 
-![crisp-tui running in Ghostty on Omarchy, with an English demo conversation and an agent-prepared reply draft](docs/images/crisp-tui-omarchy.png)
+![crisp-tui running in Ghostty on Omarchy, with a configurable sidebar showing contact details, custom data and visitor information alongside an agent-prepared reply draft](docs/images/crisp-tui-sidebar-omarchy.png)
 
-Running on Omarchy with the Tokyo Night theme. The agent-prepared draft is ready
-for human review; all contacts and messages shown are demo data.
+Running on Omarchy with the Tokyo Night theme and a configurable details sidebar.
+The agent-prepared draft is ready for human review; all displayed customer data
+is synthetic. [View the full 4K screenshot](docs/images/crisp-tui-sidebar-omarchy.png).
 
 ## Install
 
@@ -164,8 +165,9 @@ mode are kept separately for each conversation during this process.
 
 | Key | Action |
 | --- | --- |
-| Tab / Shift+Tab | Cycle inbox, messages, composer |
-| ↑↓ / j k | Select inbox row or scroll messages |
+| Tab / Shift+Tab | Cycle inbox, messages, composer and visible details panel |
+| ↑↓ / j k | Select inbox row or scroll messages/details |
+| PageUp / PageDown | Scroll messages/details by ten rows |
 | Enter in inbox | Open conversation |
 | Click inbox row | Open conversation |
 | / in inbox/messages | Search; Enter submits; empty search returns to all |
@@ -176,6 +178,7 @@ mode are kept separately for each conversation during this process.
 | Ctrl+E | Resolve / reopen active conversation |
 | Ctrl+U | Mark active conversation read |
 | Ctrl+R | Refresh inbox and active conversation |
+| Ctrl+B | Toggle details panel |
 | Esc | Focus inbox |
 | Ctrl+C | Quit |
 
@@ -184,6 +187,52 @@ can leave the send outcome unknown, so refresh before resending. Once a send is
 acknowledged, a failed follow-up refresh does not restore the draft.
 One-shot crispctl calls have a 30-second deadline; 1Password reads have a
 60-second deadline. Partial output from a timed-out process is discarded.
+
+## Customize the details panel
+
+The right sidebar shows contact details, visitor information and custom data
+from the loaded conversation. It follows the selected conversation without
+additional API requests. Ctrl+B toggles it for the current session. At its
+default width of 36 columns, it appears when the terminal is at least 120
+columns wide; narrower terminals automatically hide it.
+
+Settings are read at startup from `--config FILE`, then `CRISP_TUI_CONFIG`, then
+`$XDG_CONFIG_HOME/crisp-tui/config.json` (or `~/.config/crisp-tui/config.json`).
+No settings file is created automatically. For example:
+
+```json
+{
+  "sidebar": {
+    "enabled": true,
+    "width": 36,
+    "sections": [
+      {
+        "title": "Contact",
+        "fields": [
+          { "label": "Name", "path": ["meta", "nickname"] },
+          { "label": "Email", "path": ["meta", "email"] }
+        ]
+      },
+      { "title": "Custom data", "path": ["meta", "data"] }
+    ]
+  }
+}
+```
+
+Run `bun run dev --demo --config ./layout.json` to preview a saved configuration.
+The same option works with `live` and `check`. Sections and fields appear in the
+configured order; an explicit `sections` array replaces the defaults. Paths are
+arrays of literal object keys, so a custom key containing a dot stays one entry.
+A section with `path` lists that object's fields automatically; a section with
+`fields` selects specific values and labels. Missing values display `—`.
+
+Width accepts 24–60 columns; the panel needs another 84 columns for the inbox
+and conversation. Configurations support up to eight sections and twenty fields
+per section. Automatic sections show their first twenty fields, and long values
+are truncated to 512 characters. Configuration is JSON only; it executes no
+plugins or commands. Page history and external data sources are not included.
+Metadata updates appear on the next conversation refresh; use Ctrl+R to refresh
+immediately.
 
 ## Agent workflow
 
@@ -205,6 +254,7 @@ The control commands work against the running TUI:
 
 ```sh
 bun run src/index.ts ctl state
+bun run src/index.ts ctl details
 bun run src/index.ts ctl conversations
 bun run src/index.ts ctl messages --offset 0 --limit 20
 bun run src/index.ts ctl drafts
@@ -217,6 +267,11 @@ bun run src/index.ts ctl draft SESSION 'Revised draft' --replace
 bun run src/index.ts ctl refresh
 bun run src/index.ts ctl screen
 ```
+
+`ctl details` returns `{ revision, session, sections }` using the running TUI's
+configuration, including when the panel is hidden. Sections contain labeled
+values and truncation flags. It is read-only and makes no API requests; pass
+`--config` when starting the TUI, not to `ctl`.
 
 Control protocol **v2** returns a compact `state`: source, page/query, selected
 session, active conversation summary, loading/sending flags, counts, current draft
