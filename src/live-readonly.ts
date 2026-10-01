@@ -8,7 +8,7 @@ import { socketPath } from "./control"
 import { observeRealtime } from "./rtm-check"
 import { credentialProgress } from "./startup-progress"
 
-export async function liveReadonlyMain(args: string[], readCredentials = loadWebsiteCredentials): Promise<number> {
+export async function liveReadonlyMain(args: string[], readCredentials = loadWebsiteCredentials, loadTui = () => import("./tui")): Promise<number> {
   const { values } = parseArgs({ args, options: {
     config: { type: "string" },
     website: { type: "string" }, item: { type: "string" },
@@ -25,11 +25,12 @@ export async function liveReadonlyMain(args: string[], readCredentials = loadWeb
       if (values["rtm-timeout"] !== undefined && (!values.check || !Number.isInteger(timeout) || timeout < 1 || timeout > 120)) throw new Error("--rtm-timeout requires check mode and 1–120 seconds")
       if (!values.check && (!process.stdin.isTTY || !process.stdout.isTTY)) throw new Error("Run in an interactive terminal, or use live:check for a read-only connection test")
       const layout = await metrics.measure("startup.layout", () => loadLayout(values.config))
-      const load = () => Promise.all([
-        readCredentials(item, values.website),
-        values.check ? Promise.resolve(undefined) : metrics.measure("startup.ui_import", () => import("./tui")),
-      ] as const)
-      const [credentials, tui] = await (values.check ? load() : credentialProgress(load))
+      const startup = new AbortController()
+      const read = () => readCredentials(item, values.website)
+      const [credentials, tui] = await Promise.all([
+        values.check ? read() : credentialProgress(read, undefined, undefined, startup.signal),
+        values.check ? Promise.resolve(undefined) : metrics.measure("startup.ui_import", loadTui),
+      ]).finally(() => startup.abort()) // Stop feedback before reporting any UI-import failure.
       const websiteId = credentials.websiteId
       const session = credentialClient(credentials)
       const store = new Store(session.client)

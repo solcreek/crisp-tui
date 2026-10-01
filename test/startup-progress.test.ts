@@ -34,3 +34,24 @@ test("a synchronous credential failure also cleans up progress", async () => {
   expect(clock.pending).toBe(0)
   expect(writes.at(-1)).toBe("\r\x1b[2K")
 })
+
+test("abandoning startup stops feedback without reporting a pending credential read as finished", async () => {
+  const clock = new TestClock(), writes: string[] = [], release = Promise.withResolvers<string>(), abort = new AbortController()
+  let finished = false
+  const result = credentialProgress(() => release.promise, { isTTY: true, write: text => writes.push(text) }, clock, abort.signal)
+  void result.then(() => { finished = true })
+  abort.abort(); await clock.advance(5000)
+  expect(finished).toBe(false)
+  expect(clock.pending).toBe(0)
+  expect(writes).toHaveLength(2)
+  expect(writes.at(-1)).toBe("\r\x1b[2K")
+  release.resolve("credential"); expect(await result).toBe("credential")
+  expect(writes).toHaveLength(2)
+})
+
+test("already abandoned startup never displays credential feedback", async () => {
+  const clock = new TestClock(), writes: string[] = []
+  expect(await credentialProgress(async () => 42, { isTTY: true, write: text => writes.push(text) }, clock, AbortSignal.abort())).toBe(42)
+  expect(writes).toEqual([])
+  expect(clock.pending).toBe(0)
+})
