@@ -1,10 +1,20 @@
 # crisp-tui
 
+[![CI](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/crisp-tui?logo=npm)](https://www.npmjs.com/package/crisp-tui)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Bun: >=1.4.2](https://img.shields.io/badge/Bun-%3E%3D1.4.2-f9f1e1?logo=bun&logoColor=f9f1e1)](https://bun.sh)
+
 Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
 [crispctl](https://github.com/solcreek/crisp-cli) v0.2.0 provides all REST and RTM
 access. Both profile-based and 1Password sessions use its JSON interface;
 this project has no separate HTTP or Socket.IO implementation.
+
+![crisp-tui running in Ghostty on Omarchy, with an English demo conversation and an agent-prepared reply draft](docs/images/crisp-tui-omarchy.png)
+
+Running on Omarchy with the Tokyo Night theme. The agent-prepared draft is ready
+for human review; all contacts and messages shown are demo data.
 
 ## Install
 
@@ -39,7 +49,7 @@ Demo mode is explicit, in-memory, and never contacts Crisp. In another terminal:
 ```sh
 bun run src/index.ts ctl state
 bun run src/index.ts ctl goto session_demo_2
-bun run src/index.ts ctl draft session_demo_2 '我來協助你確認設定。'
+bun run src/index.ts ctl draft session_demo_2 'Let me help you check your settings.'
 bun run src/index.ts ctl screen
 ```
 

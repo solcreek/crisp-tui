@@ -3,7 +3,7 @@ import type { Conversation, CrispClient, Message } from "./types"
 export function demoClient(): CrispClient {
   const conversations: Conversation[] = [
     { session_id: "session_demo_1", state: "unresolved", meta: { nickname: "Demo Customer A", email: "customer-a@example.com", segments: ["billing"] }, last_message: "Can you help me find my invoice?", unread: { operator: 1 } },
-    { session_id: "session_demo_2", state: "unresolved", meta: { nickname: "Demo Customer B", email: "customer-b@example.com", segments: ["onboarding"] }, last_message: "如何邀請團隊成員？", unread: { operator: 2 } },
+    { session_id: "session_demo_2", state: "unresolved", meta: { nickname: "Demo Customer B", email: "customer-b@example.com", segments: ["onboarding"] }, last_message: "How do I invite my teammates?", unread: { operator: 2 } },
     { session_id: "session_demo_3", state: "resolved", meta: { nickname: "Demo Customer C", segments: ["feedback"] }, last_message: "That worked. Thank you!" },
   ]
   const histories: Record<string, Message[]> = Object.fromEntries(conversations.map((c, i) => [c.session_id, [

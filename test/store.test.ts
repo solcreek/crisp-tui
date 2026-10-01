@@ -9,10 +9,10 @@ describe("shared human / agent state", () => {
     const store = new Store(demoClient())
     await store.refresh()
     const ctl = controller(store)
-    const result = await ctl("draft", { session: second, text: "讓我協助你", note: true })
+    const result = await ctl("draft", { session: second, text: "Let me help you with that.", note: true })
     expect(result).toMatchObject({ sent: false, session: second })
     expect(store.state.messages).toHaveLength(1)
-    expect(store.draft()).toEqual({ text: "讓我協助你", note: true })
+    expect(store.draft()).toEqual({ text: "Let me help you with that.", note: true })
     await expect(ctl("draft", { session: second, text: "overwrite" })).rejects.toThrow("already exists")
     await ctl("draft", { session: second, text: "reviewed", replace: true })
     expect(store.draft()).toEqual({ text: "reviewed", note: false })
@@ -55,7 +55,7 @@ describe("shared human / agent state", () => {
     wait.resolve()
     await old
     expect(store.state.active?.session_id).toBe(second)
-    expect(store.state.messages[0]?.content).toContain("團隊")
+    expect(store.state.messages[0]?.content).toContain("teammates")
   })
   test("overlapping search results keep the newest query", async () => {
     const client = demoClient(), list = client.list
