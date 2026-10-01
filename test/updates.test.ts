@@ -118,3 +118,39 @@ for (const source of ["poll", "rtm"] as const) test(`${source} shutdown waits fo
   expect(store.state.revision).toBe(revision)
   expect(clock.pending).toBe(0)
 })
+
+test("first authentication replaces a pending event debounce; reconnect retains minimum spacing", async () => {
+  const clock = new TestClock(), client = demoClient(), store = new Store(client)
+  await store.refresh()
+  let event!: (value: RealtimeEvent) => void, status!: (value: RealtimeStatus) => void
+  client.subscribe = (e, s) => { event = e; status = s; return () => {} }
+  const list = client.list
+  let reads = 0
+  client.list = (...args) => { reads++; return list(...args) }
+  const stop = attachRealtime(store, 5000, clock)
+  event({ event: "message:send", data: {}, received_at: "" })
+  await clock.advance(100)
+  expect(reads).toBe(0)
+  status({ state: "authenticated" })
+  expect(clock.pending).toBe(1)
+  await clock.advance(0)
+  expect(reads).toBe(1)
+  expect(store.state.realtimeSynced).toBe(true)
+  status({ state: "reconnecting" }); status({ state: "authenticated" })
+  expect(store.state.realtimeSynced).toBe(false)
+  await clock.advance(4999); expect(reads).toBe(1)
+  await clock.advance(1); expect(reads).toBe(2)
+  expect(store.state.realtimeSynced).toBe(true)
+  stop(); await stop.done
+})
+
+test("shutdown in the first authentication turn cancels reconciliation before any reads", async () => {
+  const clock = new TestClock(), client = demoClient()
+  let reads = 0
+  client.list = async () => { reads++; return [] }
+  client.subscribe = (_, status) => { status({ state: "authenticated" }); return () => {} }
+  const stop = attachRealtime(new Store(client), 5000, clock)
+  stop(); await stop.done; await clock.advance(0)
+  expect(reads).toBe(0)
+  expect(clock.pending).toBe(0)
+})
