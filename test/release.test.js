@@ -104,3 +104,40 @@ test('ambiguous publish failures are not retried; rerun reconciles registry firs
   await f.run()
   expect(f.writes).toEqual([...natives, launcher].map(item => item.name))
 })
+
+function brokenBody() {
+  return new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode('{"dist":'))
+    controller.error(new TypeError('connection lost while reading body'))
+  } }), { status: 200 })
+}
+
+test('a response body transport failure retries the complete metadata read', async () => {
+  const f = fixture(), read = f.options.fetch
+  let first = true
+  f.options.fetch = async url => {
+    if (first) { first = false; return brokenBody() }
+    return read(url)
+  }
+  await f.run()
+  expect(f.sleeps).toEqual([100])
+  expect(f.writes).toEqual([...natives, launcher].map(item => item.name))
+})
+
+test('persistent body failures stop at the registry deadline without publishing', async () => {
+  const f = fixture()
+  f.options.fetch = async () => brokenBody()
+  await expect(f.run()).rejects.toThrow('timed out')
+  expect(f.sleeps.reduce((sum, ms) => sum + ms, 0)).toBe(1000)
+  expect(f.writes).toEqual([])
+})
+
+for (const body of ['not JSON', '{"dist":', 'null', '{}', '{"dist":{"integrity":42}}']) {
+  test(`invalid complete registry metadata fails without retry: ${body}`, async () => {
+    const f = fixture()
+    f.options.fetch = async () => new Response(body, { status: 200 })
+    await expect(f.run()).rejects.toThrow('Invalid registry metadata')
+    expect(f.sleeps).toEqual([])
+    expect(f.writes).toEqual([])
+  })
+}
