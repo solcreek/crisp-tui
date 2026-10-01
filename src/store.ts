@@ -1,7 +1,11 @@
 import { clean, label, messageText, type Conversation, type CrispClient, type Message, type RealtimeStatus } from "./types"
 import { readOnlyClient } from "./readonly"
+import { ConversationCache } from "./conversation-cache"
+import { metrics as defaultMetrics, type Metrics } from "./performance"
+import { reuseRecord, reuseRecords } from "./reconcile"
 
 type ErrorSource = "list" | "conversation" | "send" | "state" | "read" | "realtime" | "other"
+const cachedFailureStatus = "Showing saved conversation; update failed · refresh to retry"
 class OperationError extends Error {
   constructor(error: unknown, readonly source: ErrorSource, readonly current: () => boolean) {
     super(error instanceof Error ? error.message : String(error))
@@ -13,6 +17,7 @@ export interface State {
   readOnly: boolean
   selectedSession: string | null
   conversationLoading: boolean
+  conversationCached: boolean
   realtime: "off" | "connecting" | "authenticated" | "reconnecting" | "error"
   source: string; conversations: Conversation[]; active: Conversation | null; messages: Message[]
   drafts: Record<string, Draft>; query: string; page: number; loading: boolean; sending: boolean
@@ -29,9 +34,11 @@ export class Store {
   private mutationVersion = 0
   private messageVersion = 0
   private refreshTask?: Promise<void>
-  constructor(readonly client: CrispClient) {
+  private cache = new ConversationCache()
+  private openTask?: { session: string; promise: Promise<void> }
+  constructor(readonly client: CrispClient, readonly metrics: Metrics = defaultMetrics) {
     if (client.readOnly) this.client = readOnlyClient(client)
-    this.state = { selectedSession: null, conversationLoading: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", errorSource: null, status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
+    this.state = { selectedSession: null, conversationLoading: false, conversationCached: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", errorSource: null, status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
   }
   subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   update(patch: Partial<State>) {
@@ -45,7 +52,7 @@ export class Store {
       patch = { ...patch, error: latest?.[1].text ?? "", errorSource: latest?.[0] ?? null }
     }
     this.state = { ...this.state, ...patch, revision: this.state.revision + 1 }
-    for (const fn of this.listeners) fn()
+    this.metrics.sync("state.notify", () => { for (const fn of this.listeners) fn() })
   }
   private reportError(error: unknown) {
     if (error instanceof OperationError && !error.current()) return
@@ -77,11 +84,11 @@ export class Store {
     try {
       while (version === this.listing) {
         const mutation = this.mutationVersion
-        const conversations = await this.client.list(page, query)
+        const conversations = await this.metrics.measure("client.list", () => this.client.list(page, query))
         if (version !== this.listing) return
         // A completed write invalidates any list requested before its acknowledgement.
         if (mutation !== this.mutationVersion) continue
-        this.update({ conversations })
+        this.update({ conversations: this.metrics.sync("state.reconcile", () => reuseRecords(this.state.conversations, conversations, c => c.session_id)) })
         operation.clear()
         return
       }
@@ -101,25 +108,39 @@ export class Store {
     await this.fetchList(query, page)
     await this.selectInitialConversation()
   }
-  async open(session: string) {
+  open(session: string): Promise<void> {
+    if (this.state.selectedSession === session && this.openTask?.session === session) return this.openTask.promise
+    const promise = this.loadConversation(session)
+    const task = { session, promise }
+    this.openTask = task
+    // Clear the task on both paths without creating an unhandled rejected promise.
+    const clear = () => { if (this.openTask === task) this.openTask = undefined }
+    void promise.then(clear, clear)
+    return promise
+  }
+  private async loadConversation(session: string) {
     const version = ++this.selection
     this.messageVersion++
     const operation = this.operation("conversation", () => version === this.selection)
     // Selection is an intent; it survives while the matching data is loading.
-    this.update({ selectedSession: session, conversationLoading: true, active: null, messages: [], status: "Loading conversation…" })
+    const cached = this.metrics.sync("cache.lookup", () => this.cache.get(session))
+    this.metrics.increment(cached ? "cache.hit" : "cache.miss")
+    this.update({ selectedSession: session, conversationLoading: true, conversationCached: !!cached, active: cached?.active ?? null,
+      messages: cached?.messages ?? [], status: cached ? "Showing saved conversation · updating…" : "Loading conversation…" })
     try {
       while (version === this.selection) {
         const mutation = this.mutationVersion
-        const [active, messages] = await Promise.all([this.client.get(session), this.client.messages(session)])
+        const [active, messages] = await this.fetchConversation(session)
         if (version !== this.selection) return
         if (mutation !== this.mutationVersion) continue
-        this.update({ active, messages, status: `Opened ${clean(label(active))}` })
+        const snapshot = this.saveConversation(active, messages)
+        this.update({ ...snapshot, conversationCached: false, status: `Opened ${clean(label(active))}` })
         operation.clear()
         return
       }
     } catch (error) {
       if (version === this.selection) {
-        this.update({ status: "Could not load conversation; refresh to retry" })
+        this.update({ status: cached ? cachedFailureStatus : "Could not load conversation; refresh to retry" })
         throw operation.failure(error)
       }
     } finally {
@@ -143,6 +164,7 @@ export class Store {
     try {
       await this.client.reply(id, draft.text, draft.note)
       this.mutationVersion++
+      this.cache.delete(id)
       operation.clear()
       // Clear only after an acknowledged send. Never retry a failed write automatically.
       this.update({ drafts: { ...this.state.drafts, [id]: { ...draft, text: "" } }, status: draft.note ? "Internal note saved" : "Reply sent" })
@@ -161,6 +183,7 @@ export class Store {
     catch (error) { throw operation.failure(error) }
     operation.clear()
     this.mutationVersion++
+    this.cache.delete(active.session_id)
     this.messageVersion++
     const state = resolved ? "resolved" : "unresolved"
     this.update({
@@ -177,8 +200,23 @@ export class Store {
     catch (error) { throw operation.failure(error) }
     operation.clear()
     this.mutationVersion++
+    this.cache.delete(id)
     this.messageVersion++
     this.update({ active: this.state.active?.session_id === id ? { ...this.state.active, unread: { operator: 0 } } : this.state.active, conversations: this.state.conversations.map(c => c.session_id === id ? { ...c, unread: { operator: 0 } } : c), status: "Marked read" })
+  }
+  private saveConversation(active: Conversation, messages: Message[]) {
+    const snapshot = this.metrics.sync("state.reconcile", () => ({
+      active: reuseRecord(this.state.active, active),
+      messages: reuseRecords(this.state.messages, messages, message => message.fingerprint),
+    }))
+    this.metrics.sync("cache.store", () => this.cache.set(snapshot.active, snapshot.messages))
+    return snapshot
+  }
+  private fetchConversation(session: string) {
+    return Promise.all([
+      this.metrics.measure("client.get", () => this.client.get(session)),
+      this.metrics.measure("client.messages", () => this.client.messages(session)),
+    ])
   }
   private async refreshMessages() {
     const id = this.state.active?.session_id
@@ -188,8 +226,13 @@ export class Store {
     const current = () => version === this.selection && messageVersion === this.messageVersion
     const operation = this.operation("conversation", current)
     try {
-      const [active, messages] = await Promise.all([this.client.get(id), this.client.messages(id)])
-      if (current()) { this.update({ active, messages }); operation.clear() }
+      const [active, messages] = await this.fetchConversation(id)
+      if (current()) {
+        const snapshot = this.saveConversation(active, messages)
+        this.update({ ...snapshot, conversationCached: false,
+          ...(this.state.status === cachedFailureStatus ? { status: `Opened ${clean(label(active))}` } : {}) })
+        operation.clear()
+      }
     } catch (error) { if (current()) throw operation.failure(error) }
   }
   refresh(): Promise<void> {

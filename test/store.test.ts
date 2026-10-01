@@ -4,6 +4,100 @@ import { demoClient } from "../src/demo"
 import { controller } from "../src/control"
 
 const first = "session_demo_1", second = "session_demo_2"
+test("revisiting a conversation displays its snapshot before revalidation completes", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh(); store.setDraft("Keep draft")
+  await store.open(second)
+  await client.reply(first, "New remote message", false)
+  const get = client.get, wait = Promise.withResolvers<void>()
+  let gets = 0
+  client.get = async id => { gets++; await wait.promise; return get(id) }
+  const opening = store.open(first)
+  const duplicate = store.open(first)
+  expect(duplicate).toBe(opening)
+  expect(store.state.active?.session_id).toBe(first)
+  expect(store.state.messages).toHaveLength(1)
+  expect(store.state.conversationLoading).toBe(true)
+  expect(store.state.conversationCached).toBe(true)
+  expect(await controller(store)("state", {})).toMatchObject({ conversationCached: true, conversationLoading: true })
+  expect(store.state.status).toContain("Showing saved conversation")
+  expect(store.draft().text).toBe("Keep draft")
+  wait.resolve(); await opening
+  expect(gets).toBe(1)
+  expect(store.state.messages.at(-1)?.content).toBe("New remote message")
+  expect(store.state.conversationLoading).toBe(false)
+  expect(store.state.conversationCached).toBe(false)
+})
+
+test("sending while a cached conversation revalidates cannot restore the pre-send response", async () => {
+  const client = demoClient(), store = new Store(client), messages = client.messages
+  await store.refresh(); await store.open(second)
+  const started = Promise.withResolvers<void>(), wait = Promise.withResolvers<void>()
+  let calls = 0
+  client.messages = async id => {
+    const value = await messages(id)
+    if (++calls === 1) { started.resolve(); await wait.promise }
+    return value
+  }
+  const opening = store.open(first)
+  await started.promise
+  store.setDraft("Sent while updating")
+  await store.send()
+  expect(store.state.status).toBe("Reply sent")
+  expect(store.state.messages.at(-1)?.content).toBe("Sent while updating")
+  wait.resolve(); await opening
+  expect(store.state.messages.at(-1)?.content).toBe("Sent while updating")
+  expect(store.draft().text).toBe("")
+})
+
+test("failed revalidation retains the matching snapshot and refresh recovers", async () => {
+  const client = demoClient(), store = new Store(client), get = client.get
+  await store.refresh(); await store.open(second)
+  client.get = async () => { throw new Error("offline") }
+  await store.perform(() => store.open(first))
+  expect(store.state.active?.session_id).toBe(first)
+  expect(store.state.messages).toHaveLength(1)
+  expect(store.state.error).toBe("offline")
+  expect(store.state.status).toContain("Showing saved conversation; update failed")
+  expect(store.state.conversationCached).toBe(true)
+  client.get = get
+  await client.reply(first, "Recovered message", false)
+  await store.refresh()
+  expect(store.state.error).toBe("")
+  expect(store.state.conversationCached).toBe(false)
+  expect(store.state.status).not.toContain("failed")
+  expect(store.state.messages.at(-1)?.content).toBe("Recovered message")
+})
+
+test("an obsolete warm navigation cannot overwrite another cached selection", async () => {
+  const client = demoClient(), store = new Store(client), get = client.get
+  await store.refresh(); await store.open(second)
+  const wait = Promise.withResolvers<void>()
+  client.get = async id => { if (id === first) await wait.promise; return get(id) }
+  const old = store.open(first)
+  expect(store.state.active?.session_id).toBe(first)
+  await store.open(second)
+  wait.resolve(); await old
+  expect(store.state.active?.session_id).toBe(second)
+  expect(store.state.messages[0]?.content).toContain("teammates")
+})
+
+for (const action of ["changeState", "markRead", "send"] as const) test(`acknowledged ${action} cannot restore a pre-write snapshot`, async () => {
+  const client = demoClient(), store = new Store(client), get = client.get, messages = client.messages
+  await store.refresh(); store.setDraft("New reply")
+  if (action === "send") client.messages = async () => { throw new Error("follow-up read failed") }
+  await store[action]()
+  // Keep the failed send refresh from interfering with navigation to another session.
+  client.messages = messages
+  await store.open(second)
+  const wait = Promise.withResolvers<void>()
+  client.get = async id => { await wait.promise; return get(id) }
+  const opening = store.open(first)
+  expect(store.state.active).toBeNull()
+  expect(store.state.messages).toEqual([])
+  wait.resolve(); await opening
+})
+
 describe("shared human / agent state", () => {
   test("agent draft switches conversations but sends nothing; refuses overwrite", async () => {
     const store = new Store(demoClient())

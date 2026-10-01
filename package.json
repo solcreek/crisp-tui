@@ -33,6 +33,7 @@
     "test": "bun test",
     "test:coverage": "bun test --coverage && bun run scripts/check-coverage.ts",
     "test:package": "bun run scripts/test-package.ts",
+    "benchmark": "bun run scripts/benchmark.ts",
     "build": "bun run scripts/build.ts",
     "build:package": "bun run scripts/build-package.ts",
     "prepack": "bun run scripts/check-package.ts"

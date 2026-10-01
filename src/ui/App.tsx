@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
 import type { Store } from "../store"
@@ -22,7 +22,9 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
   const sidebar = () => (props.layout ?? defaultLayout).sidebar
   const [detailsEnabled, setDetailsEnabled] = createSignal(sidebar().enabled)
   const showDetails = () => detailsEnabled() && dims().width >= 84 + sidebar().width
-  const groups = () => conversationDetails(state().active, sidebar())
+  const active = createMemo(() => state().active)
+  const selected = createMemo(() => active() ?? state().conversations.find(c => c.session_id === state().selectedSession))
+  const groups = createMemo(() => store.metrics.sync("details.project", () => conversationDetails(active(), sidebar())))
   let details: ScrollBoxRenderable | undefined
   createEffect(() => { if (!showDetails() && pane() === "details") setPane("messages") })
   let textarea: TextareaRenderable | undefined
@@ -44,7 +46,10 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
     const index = cursor()
     inbox?.scrollTo(Math.max(0, index * 3 - 3))
   })
-  const open = (id: string) => run(async () => { await store.open(id); setPane(state().readOnly ? "messages" : "composer") })
+  const open = (id: string) => {
+    setPane(state().readOnly ? "messages" : "composer")
+    run(() => store.open(id))
+  }
   useKeyboard(key => {
     if (key.ctrl) {
       if (key.name === "b") { key.preventDefault(); setDetailsEnabled(value => !value); return }
@@ -100,7 +105,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
         </Show>
         <scrollbox ref={inbox} flexGrow={1} minHeight={0}>
           <For each={state().conversations}>{(c, i) => <box height={3} flexShrink={0} paddingLeft={1} paddingRight={1}
-            flexDirection="column" backgroundColor={state().active?.session_id === c.session_id ? "#234465" : pane() === "inbox" && cursor() === i() ? "#263448" : undefined}
+            flexDirection="column" backgroundColor={state().selectedSession === c.session_id ? "#234465" : pane() === "inbox" && cursor() === i() ? "#263448" : undefined}
             onMouseUp={() => { setCursor(i()); open(c.session_id) }}>
             <text fg={color.fg} truncate wrapMode="none">{c.state === "resolved" ? "✓ " : "● "}{clean(label(c))}{c.unread?.operator ? ` (${c.unread.operator})` : ""}</text>
             <text fg={color.dim} truncate wrapMode="none">{clean(c.last_message || c.meta?.email || c.session_id)}</text>
@@ -111,10 +116,11 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
       </box>
       <box flexGrow={1} minWidth={0} flexDirection="column">
         <box height={4} flexShrink={0} paddingLeft={2} paddingRight={1} paddingTop={1} flexDirection="column" border={["bottom"]} borderColor={color.line}>
-          <text fg={color.fg} truncate wrapMode="none"><b>{state().active ? clean(label(state().active!)) : "Choose a conversation"}</b>{state().active ? `  ·  ${state().active!.state || "unknown"}` : ""}</text>
-          <text fg={color.dim} truncate wrapMode="none">{clean([state().active?.meta?.email, ...(state().active?.meta?.segments || [])].filter(Boolean).join(" · "))}</text>
+          <text fg={color.fg} truncate wrapMode="none"><b>{selected() ? clean(label(selected()!)) : "Choose a conversation"}</b>{selected() ? `  ·  ${selected()!.state || "unknown"}` : ""}{state().conversationCached ? "  ·  saved copy" : ""}{state().conversationLoading ? "  ·  updating…" : ""}</text>
+          <text fg={color.dim} truncate wrapMode="none">{clean([selected()?.meta?.email, ...(selected()?.meta?.segments || [])].filter(Boolean).join(" · "))}</text>
         </box>
         <scrollbox ref={history} flexGrow={1} minHeight={0} stickyScroll stickyStart="bottom" border={pane() === "messages" ? ["left"] : undefined} borderColor={color.blue} paddingLeft={2} paddingRight={2}>
+          <Show when={state().conversationLoading && !state().active}><text fg={color.dim} marginTop={1}>Loading messages…</text></Show>
           <For each={state().messages}>{m => <box flexDirection="column" flexShrink={0} marginTop={1} marginBottom={1}>
             <text fg={m.type === "note" ? color.note : m.from === "operator" ? color.blue : color.green}>
               <b>{clean(m.user?.nickname || (m.from === "operator" ? "Operator" : "Visitor"))}</b>

@@ -1,4 +1,5 @@
 import { capture } from "./subprocess"
+import { metrics } from "./performance"
 
 export interface WebsiteCredentials { identifier: string; key: string; websiteId: string }
 
@@ -12,10 +13,12 @@ export function websiteCredentials(item: Item, override?: string): WebsiteCreden
   return { identifier, key, websiteId }
 }
 export async function loadWebsiteCredentials(item: string, websiteId?: string, executable = "op", timeoutMs = 60_000) {
-  const { stdout, code, timedOut } = await capture([executable, "item", "get", item, "--format", "json"], timeoutMs)
-  if (timedOut) throw new Error("1Password request timed out")
-  if (code) throw new Error("1Password could not read the item. Unlock the desktop app and authorize op.")
-  let itemData: Item
-  try { itemData = JSON.parse(stdout) } catch { throw new Error("1Password returned invalid JSON") }
-  return websiteCredentials(itemData, websiteId)
+  return metrics.measure("startup.credentials", async () => {
+    const { stdout, code, timedOut } = await capture([executable, "item", "get", item, "--format", "json"], timeoutMs)
+    if (timedOut) throw new Error("1Password request timed out")
+    if (code) throw new Error("1Password could not read the item. Unlock the desktop app and authorize op.")
+    let itemData: Item
+    try { itemData = JSON.parse(stdout) } catch { throw new Error("1Password returned invalid JSON") }
+    return websiteCredentials(itemData, websiteId)
+  })
 }
