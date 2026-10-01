@@ -14,7 +14,14 @@ async function benchmark(mode: "fail" | "missing" | "complete" | "over", check =
     const preload = join(dir, "preload.ts")
     // Inject deterministic render results in a separate process; exercise the real
     // CLI reporting/exit path without changing global mocks or the budget file.
-    await Bun.write(preload, `import { mock } from "bun:test"
+    // Real startup latency is checked by the dedicated benchmark CI step, not
+    // these reporting tests; loaded runners must not change their expected exit.
+    await Bun.write(preload, `import { mock, spyOn } from "bun:test"
+const file = Bun.file.bind(Bun)
+spyOn(Bun, "file").mockImplementation((path, ...args) =>
+  path === ${JSON.stringify(join(root, "scripts/performance-budgets.json"))}
+    ? { json: async () => (${JSON.stringify(Object.fromEntries(Object.entries(budgets).map(([name, limit]) => [name, name.startsWith("render.") ? limit : 60_000])))}) }
+    : file(path, ...args))
 mock.module(${JSON.stringify(join(root, "scripts/benchmark-render.tsx"))}, () => ({
   benchmarkRender: async (_runs, record) => {
     const budgets = ${JSON.stringify(budgets)}
@@ -32,6 +39,7 @@ mock.module(${JSON.stringify(join(root, "scripts/benchmark-render.tsx"))}, () =>
     const timer = setTimeout(() => child.kill("SIGKILL"), 25_000)
     try {
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      if (!stdout.trim()) throw new Error(`Benchmark exited ${code} without JSON: ${stderr}`)
       return { report: JSON.parse(stdout), stderr, code }
     } finally { clearTimeout(timer) }
   } finally { await rm(dir, { recursive: true, force: true }) }
