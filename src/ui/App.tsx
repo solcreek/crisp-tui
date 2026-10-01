@@ -55,7 +55,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void 
     if (key.name === "[") { run(() => store.list(state().query, Math.max(1, state().page - 1))); return }
     if (key.name === "]") { run(() => store.list(state().query, state().page + 1)); return }
     if (pane() === "inbox") {
-      if (key.name === "down" || key.name === "j") setCursor(i => Math.min(state().conversations.length - 1, i + 1))
+      if (key.name === "down" || key.name === "j") setCursor(i => Math.min(Math.max(0, state().conversations.length - 1), i + 1))
       if (key.name === "up" || key.name === "k") setCursor(i => Math.max(0, i - 1))
       if (key.name === "return") {
         const c = state().conversations[cursor()]
