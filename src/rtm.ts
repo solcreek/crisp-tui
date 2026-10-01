@@ -1,4 +1,4 @@
-import { clean, type Cleanup, type RealtimeSubscribe } from "./types"
+import { type Cleanup, type RealtimeSubscribe } from "./types"
 import type { Store } from "./store"
 import { systemClock, type Clock } from "./scheduling"
 
@@ -89,7 +89,7 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
   try {
     const stop = store.client.subscribe(() => { if (!stopped) { dirty = true; schedule() } }, status => {
       if (stopped) return
-      store.update({ realtime: status.state, ...(status.message ? { error: clean(status.message) } : {}) })
+      store.setRealtime(status)
       if (status.state === "authenticated") { dirty = true; schedule() }
     })
     return Object.assign(() => {

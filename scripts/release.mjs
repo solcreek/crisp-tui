@@ -15,13 +15,14 @@ export async function publishRelease(natives, launcher, version, {
   async function pause(ms = intervalMs) { await sleep(Math.min(ms, remaining())) }
   async function visible(item) {
     for (;;) {
-      let response
+      let response, body
       try {
         response = await read(`https://registry.npmjs.org/${item.name}/${version}`, {
           signal: AbortSignal.timeout(Math.min(30_000, remaining())),
         })
+        if (response.ok) body = await response.text()
       } catch (error) {
-        // Transport failures are safe to retry because this operation only reads metadata.
+        // Both headers and body must arrive; retry transport failures before parsing metadata.
         remaining()
         await pause()
         continue
@@ -35,7 +36,10 @@ export async function publishRelease(natives, launcher, version, {
       }
       if (response.status === 404) return false
       assert(response.ok, `Registry lookup failed for ${item.name}: ${response.status}`)
-      const published = await response.json()
+      let published
+      try { published = JSON.parse(body) }
+      catch { throw new Error(`Invalid registry metadata for ${item.name}`) }
+      assert(typeof published?.dist?.integrity === 'string', `Invalid registry metadata for ${item.name}`)
       assert.equal(published.dist.integrity, item.integrity, `${item.name}@${version} already exists with different contents`)
       return true
     }

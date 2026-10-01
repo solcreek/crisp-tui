@@ -91,7 +91,9 @@ export async function serve(path: string, handle: (method: string, params: Recor
           const deadline = Math.min(input.deadline ?? Infinity, Date.now() + 70_000)
           timer = setTimeout(cancel, Math.max(0, deadline - Date.now()))
           const result = await handle(input.method, params, { signal: cancellation.signal, deadline })
-          socket.end(JSON.stringify({ id, ok: true, result: result ?? null }) + "\n")
+          const response = JSON.stringify({ id, ok: true, result: result ?? null }) + "\n"
+          if (Buffer.byteLength(response) > LIMIT) throw new Error("Control response too large; use smaller pages or ctl read")
+          socket.end(response)
         } catch (e) {
           socket.end(JSON.stringify({ id, ok: false, error: e instanceof Error ? e.message : "Control error" }) + "\n")
         } finally { clearTimeout(timer) }

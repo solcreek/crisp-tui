@@ -206,7 +206,10 @@ The control commands work against the running TUI:
 ```sh
 bun run src/index.ts ctl state
 bun run src/index.ts ctl conversations
-bun run src/index.ts ctl messages
+bun run src/index.ts ctl messages --offset 0 --limit 20
+bun run src/index.ts ctl drafts
+bun run src/index.ts ctl read drafts SESSION
+bun run src/index.ts ctl read messages 0 --offset 0 --limit 16384
 bun run src/index.ts ctl goto SESSION
 bun run src/index.ts ctl draft SESSION 'Proposed reply'
 bun run src/index.ts ctl draft SESSION 'Internal context' --note
@@ -215,14 +218,41 @@ bun run src/index.ts ctl refresh
 bun run src/index.ts ctl screen
 ```
 
-`state` includes protocol version, source, current page/query, selected session,
-conversation-loading state, active conversation,
-loaded messages, per-session drafts and status. `messages` and `conversations`
-return the currently loaded page, without an API call. `screen` is a semantic
-text view of the loaded content, not an exact terminal screenshot. All other
-successful control results are JSON; errors are JSON on stderr. Exit codes are
-0 success, 1 operation error, 2 usage error, 3 no running TUI. `cli` preserves
-crispctl's own output and exit code.
+Control protocol **v2** returns a compact `state`: source, page/query, selected
+session, active conversation summary, loading/sending flags, counts, current draft
+length/note mode, error source and status. It does not embed message histories or
+all draft text. `goto` and `refresh` return the same compact state. `draft` returns
+`{session, draft: {note, length}, revision, sent: false}` without echoing the text.
+
+`messages`, `conversations` and `drafts` return
+`{revision, session, items, total, offset, nextOffset}` from locally loaded data.
+The default page size is 50, with a maximum of 100; a byte budget may shorten a
+page further. Follow `nextOffset` until it is `null`. Message text previews are
+limited to 2048 UTF-16 code units; labels/nicknames and state text fields use 512.
+Truncated previews have `previewTruncated: true`; state has `textTruncated`.
+
+Use `ctl read RESOURCE KEY` to retrieve a complete local record without changing
+the selected conversation. RESOURCE is `messages`, `conversations`, or `drafts`;
+KEY is the zero-based record index for messages/conversations or session ID for
+drafts. The response is `{revision, encoding: "json", text, offset, total,
+nextOffset}`. Concatenate `text` chunks, then JSON-parse the result. Offsets and
+limits count UTF-16 code units; chunks default to and cannot exceed 16384 units.
+This preserves full attachment metadata and Unicode, including surrogate pairs
+split across chunks. It does not fetch additional Crisp history or mark anything
+read.
+
+Pass `--revision N` from `state` on every page/chunk request to avoid combining
+different snapshots. If state changes, the request fails; obtain a fresh revision
+and restart. These reads do not change revision themselves.
+
+`screen` is a semantic text view, capped at 65536 code units with a truncation
+notice. Other successful control results are JSON; errors are JSON on stderr.
+Exit codes are 0 success, 1 operation error, 2 usage error, 3 no running TUI.
+`cli` preserves crispctl's own output and exit code.
+
+**Migration from protocol v1:** read paged results from `.items` instead of the
+bare array, use `counts` instead of embedded state collections, and retrieve full
+records with `ctl read`. Check `state.protocol` before interpreting responses.
 
 `draft` never sends or replaces an existing nonempty draft without `--replace`.
 It switches to the target conversation and focuses the composer. There is no
@@ -251,7 +281,6 @@ One newline-delimited JSON request per connection. Keep the connection open unti
 the response arrives. An optional top-level `deadline` is a Unix timestamp in
 milliseconds; the server caps it at 70 seconds from receipt:
 
-
 ```json
 {"id":1,"method":"draft","params":{"session":"session_demo_1","text":"Hello","note":false}}
 ```
@@ -259,7 +288,7 @@ milliseconds; the server caps it at 70 seconds from receipt:
 Response: `{"id":1,"ok":true,"result":…}` or
 `{"id":1,"ok":false,"error":"…"}`. Methods match `ctl` verbs. Unknown parameters
 and invalid types are rejected. Screen-changing agent requests are serialized;
-local snapshots (`state`, `screen`, `conversations`, `messages`) remain available
+local snapshots (`state`, `screen`, `conversations`, `messages`, `drafts`, `read`) remain available
 while a refresh or navigation waits on the API. CLI syntax, parameter validation
 and command permissions are defined together in `src/commands.ts`.
 No TCP server, daemon or MCP server is started.
@@ -273,6 +302,11 @@ Socket.IO authentication and reconnects. The TUI coalesces event bursts into RES
 refreshes, at most once every five seconds, and refreshes after authentication to
 reconcile changes missed during a disconnected interval. This is event-triggered
 REST reconciliation, not a local cache of every event.
+
+Failed conversation loads keep the selected session and can be retried with
+refresh. Successful background reads clear only their own errors; send failures
+remain visible until a successful send, and drafts are preserved. RTM recovery
+clears RTM errors without hiding an unrelated operation failure.
 
 Profile-based sessions also poll every 60 seconds by default. `--poll 0` disables
 that periodic polling; it does not disable RTM. `--poll N` accepts at least 30
@@ -317,7 +351,8 @@ access is not required. CI runs on macOS/Linux arm64/x64 with Node.js 22.12.0 or
 Coverage excludes test fixtures/helpers, checks for missing source files, and
 enforces overall 90% line and function thresholds for `src` from LCOV counts.
 The release coordinator has a separate 90% line/function gate; tests simulate
-registry delays, transient failures and partial releases with a fake clock. CI uploads
+registry delays, transient failures (including response-body disconnects), malformed
+metadata and partial releases with a fake clock. CI uploads
 `coverage/lcov.info` for each platform. The report measures code executed within
 the test process; PTY subprocess coverage
 (including the thin `src/index.ts` entrypoint) is not merged into that percentage.
@@ -338,7 +373,7 @@ publishes its verified artifacts. Platform packages must become publicly
 available before the launcher is published. Registry integrity checks prevent
 overwriting or silently accepting an unrelated existing version. All existing
 versions are checked before the first publish. Temporary registry read failures
-are retried within the release deadline; publish writes are never automatically
+including response-body transfer failures are retried within the release deadline; publish writes are never automatically
 retried. A rerun skips only artifacts whose registry integrity matches exactly.
 
 Configure each package once with npm 11.15.0 or newer, a logged-in maintainer

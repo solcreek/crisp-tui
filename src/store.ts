@@ -1,5 +1,12 @@
-import { clean, label, messageText, type Conversation, type CrispClient, type Message } from "./types"
+import { clean, label, messageText, type Conversation, type CrispClient, type Message, type RealtimeStatus } from "./types"
 import { readOnlyClient } from "./readonly"
+
+type ErrorSource = "list" | "conversation" | "send" | "state" | "read" | "realtime" | "other"
+class OperationError extends Error {
+  constructor(error: unknown, readonly source: ErrorSource, readonly current: () => boolean) {
+    super(error instanceof Error ? error.message : String(error))
+  }
+}
 
 export interface Draft { text: string; note: boolean }
 export interface State {
@@ -9,11 +16,14 @@ export interface State {
   realtime: "off" | "connecting" | "authenticated" | "reconnecting" | "error"
   source: string; conversations: Conversation[]; active: Conversation | null; messages: Message[]
   drafts: Record<string, Draft>; query: string; page: number; loading: boolean; sending: boolean
-  error: string; status: string; revision: number
+  error: string; errorSource: ErrorSource | null; status: string; revision: number
 }
 export class Store {
   state: State
   private listeners = new Set<() => void>()
+  private operationSequence = 0
+  private operations = new Map<ErrorSource, number>()
+  private errors = new Map<ErrorSource, { text: string; order: number }>()
   private selection = 0
   private listing = 0
   private mutationVersion = 0
@@ -21,19 +31,49 @@ export class Store {
   private refreshTask?: Promise<void>
   constructor(readonly client: CrispClient) {
     if (client.readOnly) this.client = readOnlyClient(client)
-    this.state = { selectedSession: null, conversationLoading: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
+    this.state = { selectedSession: null, conversationLoading: false, realtime: "off", readOnly: !!client.readOnly, source: client.label, conversations: [], active: null, messages: [], drafts: {}, query: "", page: 1, loading: false, sending: false, error: "", errorSource: null, status: client.readOnly ? "Read-only · no changes will be sent to Crisp" : "Ready", revision: 0 }
   }
   subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } }
   update(patch: Partial<State>) {
+    if (patch.error !== undefined) {
+      const source = patch.errorSource ?? "other"
+      if (patch.error) this.errors.set(source, { text: patch.error, order: ++this.operationSequence })
+      else this.errors.delete(source)
+      // Preserve independent failures. Writes take precedence over background diagnostics.
+      const priority = (source: ErrorSource) => ["send", "state", "read"].includes(source) ? 1 : 0
+      const latest = [...this.errors].sort(([a, x], [b, y]) => priority(b) - priority(a) || y.order - x.order)[0]
+      patch = { ...patch, error: latest?.[1].text ?? "", errorSource: latest?.[0] ?? null }
+    }
     this.state = { ...this.state, ...patch, revision: this.state.revision + 1 }
     for (const fn of this.listeners) fn()
   }
+  private reportError(error: unknown) {
+    if (error instanceof OperationError && !error.current()) return
+    this.update({ error: clean(error instanceof Error ? error.message : String(error)),
+      errorSource: error instanceof OperationError ? error.source : null })
+  }
+  private operation(source: ErrorSource, valid = () => true) {
+    const sequence = ++this.operationSequence
+    this.operations.set(source, sequence)
+    const current = () => valid() && this.operations.get(source) === sequence
+    return {
+      failure: (error: unknown) => new OperationError(error, source, current),
+      clear: () => { if (current() && this.errors.has(source)) this.update({ error: "", errorSource: source }) },
+    }
+  }
+  setRealtime(status: RealtimeStatus) {
+    const operation = this.operation("realtime")
+    this.update({ realtime: status.state })
+    if (status.message) this.reportError(operation.failure(status.message))
+    else if (status.state === "authenticated") operation.clear()
+  }
   async perform(action: () => Promise<unknown>) {
-    try { await action() } catch (e) { this.update({ error: clean(e instanceof Error ? e.message : String(e)) }) }
+    try { await action() } catch (error) { this.reportError(error) }
   }
   private async fetchList(query: string, page: number) {
     const version = ++this.listing
-    this.update({ loading: true, error: "", query, page })
+    const operation = this.operation("list", () => version === this.listing)
+    this.update({ loading: true, query, page })
     try {
       while (version === this.listing) {
         const mutation = this.mutationVersion
@@ -42,10 +82,11 @@ export class Store {
         // A completed write invalidates any list requested before its acknowledgement.
         if (mutation !== this.mutationVersion) continue
         this.update({ conversations })
+        operation.clear()
         return
       }
     } catch (error) {
-      if (version === this.listing) throw error
+      if (version === this.listing) throw operation.failure(error)
     } finally { if (version === this.listing) this.update({ loading: false }) }
   }
   private async selectInitialConversation() {
@@ -63,8 +104,9 @@ export class Store {
   async open(session: string) {
     const version = ++this.selection
     this.messageVersion++
+    const operation = this.operation("conversation", () => version === this.selection)
     // Selection is an intent; it survives while the matching data is loading.
-    this.update({ selectedSession: session, conversationLoading: true, active: null, messages: [], error: "", status: "Loading conversation…" })
+    this.update({ selectedSession: session, conversationLoading: true, active: null, messages: [], status: "Loading conversation…" })
     try {
       while (version === this.selection) {
         const mutation = this.mutationVersion
@@ -72,10 +114,14 @@ export class Store {
         if (version !== this.selection) return
         if (mutation !== this.mutationVersion) continue
         this.update({ active, messages, status: `Opened ${clean(label(active))}` })
+        operation.clear()
         return
       }
     } catch (error) {
-      if (version === this.selection) throw error
+      if (version === this.selection) {
+        this.update({ status: "Could not load conversation; refresh to retry" })
+        throw operation.failure(error)
+      }
     } finally {
       if (version === this.selection) this.update({ conversationLoading: false })
     }
@@ -92,20 +138,28 @@ export class Store {
     const draft = this.draft()
     if (!id || !draft.text.trim() || this.state.sending) return
     this.messageVersion++
-    this.update({ sending: true, error: "" })
+    const operation = this.operation("send")
+    this.update({ sending: true })
     try {
       await this.client.reply(id, draft.text, draft.note)
       this.mutationVersion++
+      operation.clear()
       // Clear only after an acknowledged send. Never retry a failed write automatically.
       this.update({ drafts: { ...this.state.drafts, [id]: { ...draft, text: "" } }, status: draft.note ? "Internal note saved" : "Reply sent" })
-      try { await this.refreshMessages() } catch { this.update({ error: "Sent successfully; refresh failed. Do not resend." }) }
-    } finally { this.update({ sending: false }) }
+      try { await this.refreshMessages() } catch (error) {
+        if (error instanceof OperationError) this.reportError(new OperationError("Sent successfully; refresh failed. Do not resend.", error.source, error.current))
+      }
+    } catch (error) { throw operation.failure(error) }
+    finally { this.update({ sending: false }) }
   }
   async changeState() {
     const active = this.state.active
     if (!active) return
     const resolved = active.state !== "resolved"
-    await this.client.state(active.session_id, resolved)
+    const operation = this.operation("state")
+    try { await this.client.state(active.session_id, resolved) }
+    catch (error) { throw operation.failure(error) }
+    operation.clear()
     this.mutationVersion++
     this.messageVersion++
     const state = resolved ? "resolved" : "unresolved"
@@ -118,7 +172,10 @@ export class Store {
   async markRead() {
     const id = this.state.active?.session_id
     if (!id) return
-    await this.client.read(id)
+    const operation = this.operation("read")
+    try { await this.client.read(id) }
+    catch (error) { throw operation.failure(error) }
+    operation.clear()
     this.mutationVersion++
     this.messageVersion++
     this.update({ active: this.state.active?.session_id === id ? { ...this.state.active, unread: { operator: 0 } } : this.state.active, conversations: this.state.conversations.map(c => c.session_id === id ? { ...c, unread: { operator: 0 } } : c), status: "Marked read" })
@@ -128,15 +185,21 @@ export class Store {
     const version = this.selection
     if (!id) return
     const messageVersion = ++this.messageVersion
-    const [active, messages] = await Promise.all([this.client.get(id), this.client.messages(id)])
-    if (version === this.selection && messageVersion === this.messageVersion) this.update({ active, messages })
+    const current = () => version === this.selection && messageVersion === this.messageVersion
+    const operation = this.operation("conversation", current)
+    try {
+      const [active, messages] = await Promise.all([this.client.get(id), this.client.messages(id)])
+      if (current()) { this.update({ active, messages }); operation.clear() }
+    } catch (error) { if (current()) throw operation.failure(error) }
   }
   refresh(): Promise<void> {
     if (this.refreshTask) return this.refreshTask
     this.refreshTask = (async () => {
       await this.fetchList(this.state.query, this.state.page)
-      if (!await this.selectInitialConversation() && !this.state.conversationLoading) await this.refreshMessages()
-      this.update({ error: "" })
+      if (!await this.selectInitialConversation() && !this.state.conversationLoading) {
+        if (!this.state.active && this.state.selectedSession) await this.open(this.state.selectedSession)
+        else await this.refreshMessages()
+      }
     })().finally(() => { this.refreshTask = undefined })
     return this.refreshTask
   }
@@ -144,7 +207,6 @@ export class Store {
     if (this.refreshTask) await this.refreshTask.catch(() => {})
     return this.refresh()
   }
-  snapshot() { return { ...this.state, draft: this.draft(), protocol: 1 } }
   screen() {
     const s = this.state
     return clean([

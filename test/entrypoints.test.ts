@@ -105,7 +105,7 @@ test("CLI control uses the shared registry and formats JSON and text responses",
   const server = await serve(socket, controller(store)), log = spyOn(console, "log").mockImplementation(() => {})
   try {
     expect(await main(["ctl", "draft", "session_demo_2", "from CLI", "--note"])).toBe(0)
-    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({ sent: false, draft: { text: "from CLI", note: true } })
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({ sent: false, draft: { length: 8, note: true } })
     expect(await main(["ctl", "screen"])).toBe(0)
     expect(String(log.mock.calls.at(-1)?.[0])).toContain("Internal note draft: from CLI")
   } finally { log.mockRestore(); await server.stop() }
