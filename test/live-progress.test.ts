@@ -36,7 +36,7 @@ for (const fails of [false, true]) test(`live PTY shows credential progress befo
     if (fails) {
       expect(await Promise.race([child.exited, Bun.sleep(8000).then(() => "timeout")])).toBe(1)
       expect(screen).toContain("1Password could not read")
-      expect(screen).toContain("\r\x1b[2K{") // Clear the waiting line before the diagnostic.
+      expect(screen.replace(/\x1b\[[0-9;]*m/g, "")).toContain("\r\x1b[2K{") // Clear before the possibly colored diagnostic.
     } else {
       await until(async () => screen.includes("READ ONLY") && !!(await request(socket, "state", {}) as { initialReadComplete: boolean }).initialReadComplete)
       expect(await request(socket, "state", {})).toMatchObject({ readOnly: true })

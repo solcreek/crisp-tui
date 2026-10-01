@@ -30,6 +30,12 @@ test("installed crispctl exposes the expected version and redacted website auth"
   expect(await run()(["auth", "show"])).toMatchObject({ tier: "website", key: "set", identifier: "fixture-identifier", website_id: website })
 }, 30_000)
 
+test("the HTTP fixture rejects raw sockets even outside the mocked dispatcher", async () => {
+  const invoke = runner([Bun.which("node")!, "--import", `${import.meta.dir}/fixtures/crispctl-http.mjs`, "--eval",
+    'try { require("node:net").connect(1, "127.0.0.1"); process.exit(90) } catch (error) { console.log(JSON.stringify({ message: error.message })) }', "--"], [], { PATH: process.env.PATH })
+  expect(await invoke([])).toEqual({ message: "Network disabled in crispctl contract tests" })
+}, 30_000)
+
 test("real crispctl parses adapter list, search, get and message arguments", async () => {
   expect(await client({ method: "GET", path: `${site}/conversations/2`, response: ok([conversation]) }).list(2, "")).toEqual([conversation])
   const query = "receipt & invoice"
