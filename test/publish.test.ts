@@ -39,12 +39,15 @@ require('node:fs').appendFileSync(process.env.PUBLISH_TEST_LOG, JSON.stringify(p
     const mock = join(dir, "registry.mjs")
     await writeFile(mock, `import { readFileSync } from 'node:fs';
 const integrities = JSON.parse(process.env.PUBLISH_TEST_INTEGRITIES);
+const visiblePlatforms = new Set();
 globalThis.fetch = async url => {
   const name = new URL(url).pathname.split('/')[1];
   const mode = process.env.PUBLISH_TEST_MODE;
   if (mode === 'dry') throw new Error('dry run must not query registry');
+  if (mode === 'new' && name === 'crisp-tui' && visiblePlatforms.size !== 4) throw new Error('launcher published before all platforms became visible');
   const calls = readFileSync(process.env.PUBLISH_TEST_LOG, 'utf8');
   if (mode === 'new' && !calls.includes(name + '-' + ${JSON.stringify(pkg.version)} + '.tgz')) return new Response('', {status:404});
+  if (name !== 'crisp-tui') visiblePlatforms.add(name);
   return Response.json({dist:{integrity: mode === 'mismatch' ? 'wrong' : integrities[name]}});
 };`)
     await run({ dir, log, async invoke(mode, dry = false) {
