@@ -81,6 +81,17 @@ test("live entrypoint rejects missing items and invalid RTM bounds before creden
   } finally { error.mockRestore() }
 })
 
+test("noninteractive live mode fails before requesting credentials", async () => {
+  if (process.stdin.isTTY && process.stdout.isTTY) return
+  const error = spyOn(console, "error").mockImplementation(() => {})
+  let reads = 0
+  try {
+    expect(await liveReadonlyMain(["--item", "Synthetic item"], async () => { reads++; throw new Error("unexpected credential read") })).toBe(1)
+    expect(reads).toBe(0)
+    expect(String(error.mock.calls.at(-1)?.[0])).toContain("interactive terminal")
+  } finally { error.mockRestore() }
+})
+
 test("CLI help, validation and exit-code mapping", async () => {
   const log = spyOn(console, "log").mockImplementation(() => {})
   try {
