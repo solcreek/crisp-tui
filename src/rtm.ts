@@ -78,10 +78,17 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
   let active = Promise.resolve()
   const drained = Promise.withResolvers<void>()
   let running = false, dirty = false, stopped = false, last = 0
+  let firstAuthentication = true
   let epoch = 0
-  const schedule = () => {
-    if (stopped || running || cancelTimer) return
-    cancelTimer = clock.after(Math.max(200, minRefreshMs - (clock.now() - last)), () => {
+  const schedule = (immediate = false) => {
+    if (stopped || running) return
+    if (cancelTimer) {
+      if (!immediate) return
+      cancelTimer()
+    }
+    // Yield one turn so synchronous subscription failure/stop can still cancel.
+    // Only the first authentication bypasses event debounce and refresh spacing.
+    cancelTimer = clock.after(immediate ? 0 : Math.max(200, minRefreshMs - (clock.now() - last)), () => {
       cancelTimer = undefined
       if (stopped) return
       dirty = false; running = true; last = clock.now()
@@ -94,11 +101,15 @@ export function attachRealtime(store: Store, minRefreshMs = 5000, clock: Clock =
     })
   }
   try {
-    const invalidate = () => { epoch = store.invalidateReads(); dirty = true; schedule() }
+    const invalidate = (immediate = false) => { epoch = store.invalidateReads(); dirty = true; schedule(immediate) }
     const stop = store.client.subscribe(() => { if (!stopped) invalidate() }, status => {
       if (stopped) return
       store.setRealtime(status)
-      if (status.state === "authenticated") invalidate()
+      if (status.state === "authenticated") {
+        const immediate = firstAuthentication
+        firstAuthentication = false
+        invalidate(immediate)
+      }
     })
     return Object.assign(() => {
       if (stopped) return

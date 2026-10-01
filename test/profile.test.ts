@@ -33,8 +33,9 @@ for (const mode of ["flag", "env", "tier", "missing"] as const) test(`profile TU
       await expect(stat(socket)).rejects.toMatchObject({ code: "ENOENT" })
     } else {
       await until(async () => {
-        const state = await request(socket, "state") as { active?: { session_id: string }; realtime: string }
-        return state.active?.session_id === "session_fixture" && state.realtime === "authenticated"
+        const state = await request(socket, "state") as { active?: { session_id: string }; realtime: string; initialReadComplete: boolean }
+        // Details can arrive before messages; assertions below need the full snapshot.
+        return state.initialReadComplete && state.active?.session_id === "session_fixture" && state.realtime === "authenticated"
       })
       expect(await request(socket, "state")).toMatchObject({ readOnly: true, source: "synthetic · website 11111111-1111-1111-1111-111111111111" })
       expect(await request(socket, "messages")).toMatchObject({ items: [{ content: "Synthetic profile message" }] })

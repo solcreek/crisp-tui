@@ -101,7 +101,8 @@ test("events during an in-flight read still require a newer read and cannot mark
     emit(); release.resolve(); await clock.flush()
     expect(store.state.realtimeSynced).toBe(false)
     await clock.advance(200)
-    expect(calls).toEqual({ list: 3, get: 2, messages: 2 })
+    // All three parallel reads started before the event and require revalidation.
+    expect(calls).toEqual({ list: 3, get: 3, messages: 3 })
     expect(store.state.realtimeSynced).toBe(true)
   } finally { release.resolve(); stop(); await stop.done }
 })

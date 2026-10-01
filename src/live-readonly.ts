@@ -6,8 +6,9 @@ import { credentialClient } from "./session"
 import { Store } from "./store"
 import { socketPath } from "./control"
 import { observeRealtime } from "./rtm-check"
+import { credentialProgress } from "./startup-progress"
 
-export async function liveReadonlyMain(args: string[], readCredentials = loadWebsiteCredentials): Promise<number> {
+export async function liveReadonlyMain(args: string[], readCredentials = loadWebsiteCredentials, loadTui = () => import("./tui")): Promise<number> {
   const { values } = parseArgs({ args, options: {
     config: { type: "string" },
     website: { type: "string" }, item: { type: "string" },
@@ -18,14 +19,18 @@ export async function liveReadonlyMain(args: string[], readCredentials = loadWeb
     console.log("crisp-tui live --item ITEM [--website UUID] [--config FILE]\ncrisp-tui check --item ITEM [--website UUID] [--config FILE] [--rtm-timeout SECONDS]\nWebsite ID defaults to the item's website_id field. API access uses crispctl --read-only. Credentials and customer content are never saved.")
   } else {
     try {
-      if (!values.item?.trim()) throw new Error("Choose a 1Password item explicitly with --item ITEM")
+      const item = values.item
+      if (!item?.trim()) throw new Error("Choose a 1Password item explicitly with --item ITEM")
       const timeout = values["rtm-timeout"] === undefined ? 0 : Number(values["rtm-timeout"])
       if (values["rtm-timeout"] !== undefined && (!values.check || !Number.isInteger(timeout) || timeout < 1 || timeout > 120)) throw new Error("--rtm-timeout requires check mode and 1–120 seconds")
+      if (!values.check && (!process.stdin.isTTY || !process.stdout.isTTY)) throw new Error("Run in an interactive terminal, or use live:check for a read-only connection test")
       const layout = await metrics.measure("startup.layout", () => loadLayout(values.config))
+      const startup = new AbortController()
+      const read = () => readCredentials(item, values.website)
       const [credentials, tui] = await Promise.all([
-        readCredentials(values.item, values.website),
-        values.check ? Promise.resolve(undefined) : metrics.measure("startup.ui_import", () => import("./tui")),
-      ])
+        values.check ? read() : credentialProgress(read, undefined, undefined, startup.signal),
+        values.check ? Promise.resolve(undefined) : metrics.measure("startup.ui_import", loadTui),
+      ]).finally(() => startup.abort()) // Stop feedback before reporting any UI-import failure.
       const websiteId = credentials.websiteId
       const session = credentialClient(credentials)
       const store = new Store(session.client)
@@ -53,7 +58,6 @@ export async function liveReadonlyMain(args: string[], readCredentials = loadWeb
           tuiRendered: rendered, commands: session.commands, rtm, writes: 0,
         }, null, 2))
       } else {
-        if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Run in an interactive terminal, or use live:check for a read-only connection test")
         await tui!.startTui(store, socketPath("onepassword-readonly", websiteId), 0, undefined, layout)
       }
     } catch (error) {

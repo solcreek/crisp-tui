@@ -9,6 +9,7 @@ import { CliError, command } from "../src/crispctl"
 import { NotRunning, serve, controller } from "../src/control"
 import { Store } from "../src/store"
 import { demoClient } from "../src/demo"
+import { TestClock } from "./helpers/clock"
 
 const scratch = await mkdtemp(join(tmpdir(), "crisp-entrypoints-"))
 for (const [source, name] of [["op-cli.ts", "op"], ["live-cli.ts", "crispctl"]] as const) {
@@ -39,6 +40,60 @@ function fixtures(output = JSON.stringify(item)) {
     CRISPCTL_CONFIG: join(scratch, "nonexistent.json"), TEST_OP_OUTPUT: output, TEST_OP_EXIT: "0", TEST_OP_HANG: "0", TEST_BRIDGE_EXIT: "" })
 }
 const readCredentials = (name: string, id?: string) => loadWebsiteCredentials(name, id, join(scratch, "op"))
+
+for (const order of ["credentials", "ui", "ui-error"] as const) test(`credential feedback follows the read when ${order} finishes first`, async () => {
+  fixtures()
+  const streams = [process.stdin, process.stdout, process.stderr]
+  const descriptors = streams.map(stream => Object.getOwnPropertyDescriptor(stream, "isTTY"))
+  for (const stream of streams) Object.defineProperty(stream, "isTTY", { value: true, configurable: true })
+  const writes: string[] = []
+  const output = spyOn(process.stderr, "write").mockImplementation(chunk => { writes.push(String(chunk)); return true })
+  const errors = spyOn(console, "error").mockImplementation(value => { writes.push(String(value)) })
+  const credentials = Promise.withResolvers<Awaited<ReturnType<typeof readCredentials>>>()
+  const ui = Promise.withResolvers<Awaited<ReturnType<NonNullable<Parameters<typeof liveReadonlyMain>[2]>>>>()
+  const started = Promise.withResolvers<void>(), clock = new TestClock()
+  let reads = 0, mounts = 0
+  const fakeUi = { startTui: async () => { mounts++; return { stop: async () => {} } } }
+  const result = liveReadonlyMain(["--item", "Synthetic item"], () => { reads++; return credentials.promise }, () => { started.resolve(); return ui.promise })
+  try {
+    await started.promise
+    expect(reads).toBe(1) // Both tasks started before either is released.
+    expect(writes.at(-1)).toContain("Reading 1Password credentials")
+    if (order === "credentials") {
+      credentials.resolve({ identifier: "fake-identifier", key: "fake-secret", websiteId: website })
+      await clock.flush()
+      expect(writes.at(-1)).toBe("\r\x1b[2K")
+      expect(mounts).toBe(0)
+      ui.resolve(fakeUi)
+    } else if (order === "ui") {
+      ui.resolve(fakeUi); await clock.flush()
+      expect(writes.at(-1)).toContain("Reading 1Password credentials")
+      expect(mounts).toBe(0)
+      credentials.resolve({ identifier: "fake-identifier", key: "fake-secret", websiteId: website })
+    } else {
+      ui.reject(new Error("UI import failed"))
+      expect(await result).toBe(1)
+      expect(writes.at(-2)).toBe("\r\x1b[2K")
+      expect(writes.at(-1)).toContain("UI import failed")
+      const count = writes.length
+      credentials.resolve({ identifier: "fake-identifier", key: "fake-secret", websiteId: website })
+      await clock.flush()
+      expect(writes).toHaveLength(count) // A late credential read cannot clear the diagnostic.
+    }
+    expect(await result).toBe(order === "ui-error" ? 1 : 0)
+    expect(mounts).toBe(order === "ui-error" ? 0 : 1)
+    expect(writes.join("")).not.toContain("fake-secret")
+  } finally {
+    credentials.resolve({ identifier: "fake-identifier", key: "fake-secret", websiteId: website }); ui.resolve(fakeUi)
+    await result
+    output.mockRestore(); errors.mockRestore()
+    streams.forEach((stream, index) => {
+      const descriptor = descriptors[index]
+      if (descriptor) Object.defineProperty(stream, "isTTY", descriptor)
+      else Reflect.deleteProperty(stream, "isTTY")
+    })
+  }
+})
 
 test("1Password subprocess preserves item argv and never exposes raw failures", async () => {
   fixtures()
@@ -78,6 +133,17 @@ test("live entrypoint rejects missing items and invalid RTM bounds before creden
       expect(await liveReadonlyMain(args)).toBe(1)
       expect(JSON.parse(String(error.mock.calls.at(-1)?.[0])).ok).toBe(false)
     }
+  } finally { error.mockRestore() }
+})
+
+test("noninteractive live mode fails before requesting credentials", async () => {
+  if (process.stdin.isTTY && process.stdout.isTTY) return
+  const error = spyOn(console, "error").mockImplementation(() => {})
+  let reads = 0
+  try {
+    expect(await liveReadonlyMain(["--item", "Synthetic item"], async () => { reads++; throw new Error("unexpected credential read") })).toBe(1)
+    expect(reads).toBe(0)
+    expect(String(error.mock.calls.at(-1)?.[0])).toContain("interactive terminal")
   } finally { error.mockRestore() }
 })
 

@@ -7,7 +7,7 @@
 
 Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
-[crispctl](https://github.com/solcreek/crisp-cli) v0.4.0 provides all REST and RTM
+[crispctl](https://github.com/solcreek/crisp-cli) v0.5.0 provides all REST and RTM
 access. Both profile-based and 1Password sessions use its JSON interface;
 this project has no separate HTTP or Socket.IO implementation.
 
@@ -94,6 +94,10 @@ reply/note, resolve/reopen and mark-read before any HTTP request. The TUI displa
 polling is off in this mode: RTM events trigger refreshes, and Ctrl+R refreshes
 manually. Opening a conversation does not mark it read.
 
+Before the TUI opens, an interactive terminal shows the elapsed 1Password wait
+and a reminder to authorize `op`. The prompt clears on success or failure;
+`check` output remains JSON without progress text.
+
 `live:check` normally uses three REST commands: the first conversation page,
 details of the first conversation, and its messages (one if the inbox is empty).
 With `--rtm-timeout N`, it additionally listens until an event is received or the
@@ -118,10 +122,10 @@ requests use Basic auth with `identifier:key` and `X-Crisp-Tier: website`.
 The token belongs to one workspace. `crispctl` supplies these headers; this
 project never includes the secret in UI state or stores a second copy.
 
-This source checkout uses crispctl v0.4.0. To configure it separately on PATH:
+This source checkout uses crispctl v0.5.0. To configure it separately on PATH:
 
 ```sh
-npm install -g crispctl@0.4.0
+npm install -g crispctl@0.5.0
 ```
 
 Alternatively, build [crisp-cli from source](https://github.com/solcreek/crisp-cli#install)
@@ -198,6 +202,13 @@ the inbox request cannot prematurely satisfy `synced_frame`. Counters
 catch-up requests avoided because a successful read already covers the observed
 event/authentication boundary. Reconnects and events during a read still require
 reads started after that boundary; failed or superseded reads never qualify.
+
+Once a conversation is selected, refresh reads the inbox, details and messages
+concurrently. Cold startup still needs the inbox before selecting a conversation.
+The first RTM authentication schedules catch-up immediately; subsequent events
+and reconnects retain the debounce and minimum refresh interval. See the
+[startup measurements](docs/startup-performance.md) for a paired live comparison
+and the remaining transport bottleneck.
 
 All durations are milliseconds. Counts, mean and max cover the process lifetime;
 p50/p95 use the most recent 256 samples per metric. Startup frame milestones use
@@ -448,7 +459,8 @@ The TUI starts `crispctl listen --json --read-only` and subscribes to message
 send/receive/update/removal and conversation-state events. The header shows
 `RTM live`, connecting, reconnecting or error. Crispctl handles endpoint discovery,
 Socket.IO authentication and reconnects. The TUI coalesces event bursts into REST
-refreshes, at most once every five seconds, and refreshes after authentication to
+refreshes, normally at most once every five seconds. First authentication bypasses
+the event debounce; reconnects retain the minimum interval and refresh to
 reconcile changes missed during a disconnected interval. This is event-triggered
 REST reconciliation, not a local cache of every event.
 
