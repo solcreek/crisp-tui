@@ -93,7 +93,7 @@ test("previews and screen mark truncation and keep state free of internal fields
   store.update({ query: "q".repeat(2000), messages: [{ content: "m".repeat(100_000) }] })
   expect(controlState(store)).toMatchObject({ textTruncated: true })
   expect(controlScreen(store)).toContain("[Screen truncated;")
-  expect(controlScreen(store).length).toBeLessThan(66_000)
+  expect(controlScreen(store).length).toBeLessThanOrEqual(65_536)
 })
 
 test("byte-limited pages advance without skipping records and oversized records remain readable", async () => {
@@ -120,4 +120,22 @@ test("server rejects an oversized response with a bounded actionable error", asy
   const server = await serve(path, () => "x".repeat(1_048_576))
   try { await expect(request(path, "state")).rejects.toThrow("use smaller pages or ctl read") }
   finally { await server.stop(); await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test("screen cap includes its complete notice and leaves inputs at or below the limit unchanged", () => {
+  const store = new Store(demoClient())
+  store.update({ messages: [{ content: "" }] })
+  const overhead = store.screen().length
+  for (const length of [65_535, 65_536, 65_537]) {
+    store.update({ messages: [{ content: "x".repeat(length - overhead) }] })
+    const original = store.screen(), result = controlScreen(store)
+    expect(original.length).toBe(length)
+    expect(result.length).toBeLessThanOrEqual(65_536)
+    if (length <= 65_536) expect(result).toBe(original)
+    else {
+      expect(result.length).toBe(65_536)
+      expect(result).toEndWith("\n[Screen truncated; use ctl messages/conversations/drafts and ctl read.]")
+    }
+  }
 })

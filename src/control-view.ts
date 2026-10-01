@@ -75,5 +75,6 @@ export function controlRead(store: Store, resource: string, key: string, options
 }
 export function controlScreen(store: Store) {
   const text = store.screen()
-  return text.length <= 65_536 ? text : text.slice(0, 65_536) + "\n[Screen truncated; use ctl messages/conversations/drafts and ctl read.]"
+  const notice = "\n[Screen truncated; use ctl messages/conversations/drafts and ctl read.]"
+  return text.length <= 65_536 ? text : text.slice(0, 65_536 - notice.length) + notice
 }
