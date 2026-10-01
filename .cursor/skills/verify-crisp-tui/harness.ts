@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process"
 import { closeSync, existsSync, openSync } from "node:fs"
 import { appendFileSync } from "node:fs"
-import { chmod, lstat, mkdir, rename, rm } from "node:fs/promises"
+import { chmod, lstat, mkdir, readdir, rename, rm } from "node:fs/promises"
 import { createConnection, createServer, type Server, type Socket } from "node:net"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -14,6 +14,16 @@ const COLS = 100
 const ROWS = 30
 const READY_MS = 10_000
 const WAIT_MS = 5_000
+// OpenTUI's stdin parser holds a lone ESC for 20ms in case a CSI sequence
+// follows. The UI test waits 50ms so the next byte is not read as Alt.
+const ESC_SETTLE_MS = 50
+
+class CtlTimeout extends Error {
+  constructor(timeoutMs: number) {
+    super(`ctl timed out after ${timeoutMs}ms`)
+    this.name = "CtlTimeout"
+  }
+}
 
 const KEYS: Record<string, string> = {
   enter: "\r",
@@ -184,7 +194,7 @@ async function writeMeta(meta: Meta) {
   await rename(tmp, path)
 }
 
-async function runCtl(runId: string, args: string[]) {
+async function runCtl(runId: string, args: string[], timeoutMs?: number) {
   const repo = await findRepo(import.meta.dir)
   const proc = Bun.spawn([process.execPath, join(repo, "src/index.ts"), "ctl", ...args], {
     cwd: repo,
@@ -193,12 +203,24 @@ async function runCtl(runId: string, args: string[]) {
     stdout: "pipe",
     stderr: "pipe",
   })
-  const [stdout, stderr, code] = await Promise.all([
+  const finished = Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
-  ])
-  return { code, stdout, stderr }
+  ]).then(([stdout, stderr, code]) => ({ code, stdout, stderr }))
+  if (timeoutMs === undefined) return finished
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const limited = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      proc.kill("SIGKILL")
+      reject(new CtlTimeout(timeoutMs))
+    }, Math.max(1, timeoutMs))
+  })
+  try {
+    return await Promise.race([finished, limited])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 async function record(runId: string, file: string, entry: unknown) {
@@ -239,7 +261,7 @@ function rpc(sockPath: string, payload: unknown, timeout: number) {
   })
 }
 
-async function assess(runId: string) {
+async function assess(runId: string, timeoutMs = WAIT_MS) {
   const repo = await findRepo(import.meta.dir)
   const pkg = JSON.parse(await Bun.file(join(repo, "package.json")).text()) as { version?: string }
   const expected = paths(runId)
@@ -267,7 +289,7 @@ async function assess(runId: string) {
   if (!stat?.isSocket()) throw new Error("Private control socket is not listening")
   if (stat.uid !== process.getuid?.()) throw new Error("Control socket is owned by another user")
   if (stat.mode & 0o077) throw new Error("Control socket is not mode 0600")
-  const stateRun = await runCtl(runId, ["state"])
+  const stateRun = await runCtl(runId, ["state"], timeoutMs)
   if (stateRun.code !== 0) throw new Error((stateRun.stderr || stateRun.stdout).trim() || `ctl state exited ${stateRun.code}`)
   const state = JSON.parse(stateRun.stdout) as {
     source?: string
@@ -461,8 +483,19 @@ async function supervise(runId: string) {
       const text = request.text === undefined ? undefined : String(request.text)
       const repeat = Number(request.repeat ?? 1)
       const bytes = encodeKeys(name, text, repeat)
-      keyChain = keyChain.then(() => {
-        if (!terminal.closed) terminal.write(bytes)
+      keyChain = keyChain.then(async () => {
+        if (terminal.closed) return
+        // A lone ESC is not a key until the parser's settle window ends.
+        // Returning earlier lets the next key join it and become Alt.
+        if (name === "esc") {
+          for (let i = 0; i < repeat; i++) {
+            if (terminal.closed) return
+            terminal.write("\x1b")
+            await Bun.sleep(ESC_SETTLE_MS)
+          }
+          return
+        }
+        terminal.write(bytes)
       })
       await keyChain
       return { ok: true }
@@ -509,6 +542,14 @@ function handleClient(connection: Socket, handle: (request: Record<string, unkno
   })
 }
 
+async function assertFreshEvidence(runId: string) {
+  const dir = paths(runId).evidence
+  if (!existsSync(dir)) return
+  if ((await readdir(dir)).length > 0) {
+    throw new Error(`Evidence for ${runId} already exists at ${dir}. Choose another --run. Cleanup keeps that directory so a later launch cannot append to it.`)
+  }
+}
+
 async function launch(runId: string) {
   assertRunId(runId)
   const repo = await findRepo(import.meta.dir)
@@ -517,6 +558,7 @@ async function launch(runId: string) {
   if (!existsSync(join(repo, "node_modules"))) throw new Error("node_modules is missing. Run bun install in the crisp-tui checkout, then launch again.")
   const expected = paths(runId)
   if (existsSync(expected.dir)) throw new Error(`Run directory already exists for ${runId}. Run cleanup or choose another --run.`)
+  await assertFreshEvidence(runId)
   await mkdir("/tmp/crisp-tui-verify", { recursive: true, mode: 0o700 })
   await chmod("/tmp/crisp-tui-verify", 0o700)
   await mkdir(expected.dir, { recursive: true, mode: 0o700 })
@@ -536,7 +578,7 @@ async function launch(runId: string) {
     let last = "supervisor did not become ready"
     while (Date.now() < end) {
       try {
-        return await assess(runId)
+        return await assess(runId, Math.max(1, end - Date.now()))
       } catch (error) {
         last = error instanceof Error ? error.message : String(error)
       }
@@ -556,24 +598,39 @@ async function waitFor(runId: string, kind: string, text: string) {
   if (!text) throw new Error("wait requires the text after --")
   if (!["pty", "screen", "status", "messages"].includes(kind)) throw new Error("wait kind must be pty, screen, status, or messages")
   const end = Date.now() + WAIT_MS
+  try {
+    await assess(runId, Math.max(1, end - Date.now()))
+  } catch (error) {
+    if (!(error instanceof CtlTimeout)) throw error
+  }
   while (Date.now() < end) {
     let hay = ""
     if (kind === "pty") hay = await readPty(runId)
     else {
       const args = kind === "messages" ? ["messages"] : kind === "screen" ? ["screen"] : ["state"]
-      const result = await runCtl(runId, args)
-      if (result.code === 0) {
-        hay = kind === "status" ? (JSON.parse(result.stdout) as { status?: string }).status ?? "" : result.stdout
+      const remaining = end - Date.now()
+      if (remaining <= 0) break
+      try {
+        const result = await runCtl(runId, args, remaining)
+        if (result.code === 0) {
+          hay = kind === "status" ? (JSON.parse(result.stdout) as { status?: string }).status ?? "" : result.stdout
+        }
+      } catch (error) {
+        if (error instanceof CtlTimeout) break
+        throw error
       }
     }
     if (hay.includes(text)) return { ok: true, via: kind, text }
-    await Bun.sleep(30)
+    const pause = Math.min(30, end - Date.now())
+    if (pause <= 0) break
+    await Bun.sleep(pause)
   }
   throw new Error(`Timed out waiting for ${kind} to include ${JSON.stringify(text)}\n${(await readPty(runId)).slice(-500)}`)
 }
 
 async function capture(runId: string, name: string, action: string | undefined) {
   if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error("Capture name must match ^[a-z0-9][a-z0-9-]{0,40}$")
+  await assess(runId)
   const dir = join(paths(runId).evidence, name)
   await mkdir(dir, { recursive: true })
   const calls = await Promise.all([
@@ -655,6 +712,7 @@ async function main() {
       const text = name === "type" ? parsed!.rest.join(" ") : undefined
       if (name === "type" && parsed!.rest.length === 0) throw new Error("keys type requires text after --")
       encodeKeys(name, text, parsed!.repeat ?? 1)
+      await assess(runId)
       await rpc(paths(runId).harnessSock, { cmd: "keys", name, text, repeat: parsed!.repeat ?? 1 }, 5_000)
       await record(runId, "keys.jsonl", { at: new Date().toISOString(), name, text: text ?? null, repeat: parsed!.repeat ?? 1, code: 0 })
       emit({ ok: true, name, repeat: parsed!.repeat ?? 1 })
@@ -662,6 +720,7 @@ async function main() {
     if (parsed!.command === "ctl") {
       const runId = resolveRun(parsed!)
       if (parsed!.rest.length === 0) throw new Error("ctl requires arguments after --")
+      await assess(runId)
       const result = await runCtl(runId, parsed!.rest)
       await record(runId, "ctl.jsonl", {
         at: new Date().toISOString(),

@@ -25,7 +25,7 @@ One command starts a supervisor and the demo TUI:
 bun .cursor/skills/verify-crisp-tui/harness.ts launch
 ```
 
-Pass `--run <id>` or set `CRISP_TUI_VERIFY_RUN` to choose the id. Otherwise launch generates one. An id matches `^[a-z0-9][a-z0-9-]{0,39}$`. Launch refuses an id whose `/tmp/crisp-tui-verify/<id>` directory already exists.
+Pass `--run <id>` or set `CRISP_TUI_VERIFY_RUN` to choose the id. Otherwise launch generates one. An id matches `^[a-z0-9][a-z0-9-]{0,39}$`. Launch refuses an id whose `/tmp/crisp-tui-verify/<id>` directory already exists. It also refuses an id whose evidence directory already has files, because cleanup leaves that directory in place and a second launch must not append to it.
 
 Stdout is one JSON object. Require `"ok":true`, `"source":"DEMO · local only"`, and `"activeSession":"session_demo_1"`. Export the printed `runId`:
 
@@ -63,7 +63,7 @@ Doctor is read-only. It checks the recorded supervisor and TUI pids, that their 
 
 ## Drive
 
-Human keys go through `keys`. Agent commands go through `ctl`. Do not write the PTY yourself, do not open the default socket, and do not call `src/index.ts` except through this helper.
+Human keys go through `keys`. Agent commands go through `ctl`. Do not write the PTY yourself, do not open the default socket, and do not call `src/index.ts` except through this helper. Before `ctl`, `keys`, `wait`, or `capture`, the helper runs the same identity check as doctor. A process that is not this checkout's demo on the private socket is not driven.
 
 ```sh
 bun .cursor/skills/verify-crisp-tui/harness.ts keys <name> [--repeat N]
@@ -76,7 +76,7 @@ Send one `keys` command at a time and wait for its JSON `{"ok":true}` before the
 
 - `enter` submits the focused control. In the inbox it opens the highlighted row and focuses the composer. In the composer it sends the draft. In search it submits the query.
 - `tab` cycles inbox, then messages, then composer, then inbox. The helper has no Shift+Tab key.
-- `esc` focuses the inbox. Send it alone, before the next key.
+- `esc` focuses the inbox. The helper waits 50 ms after sending it before it returns, so the next key is not parsed as Alt. Send it alone.
 - `j` and `k` move the inbox highlight down and up. `up` and `down` are the arrow keys.
 - `slash` opens search from the inbox or the messages pane.
 - `prev` and `next` are the `[` and `]` page keys.
@@ -91,7 +91,7 @@ Send one `keys` command at a time and wait for its JSON `{"ok":true}` before the
 
 Verbs that exist: `state`, `screen`, `conversations`, `messages`, `refresh`, `goto SESSION`, `draft SESSION TEXT`, plus `--note` and `--replace` on `draft`. `state`, `screen`, `conversations`, and `messages` are snapshots of the loaded screen. `screen` is the semantic text view, not a pixel copy of the PTY. There is no `ctl` verb for send, search, resolve, or mark read. Those happen only through the keys above. `draft` focuses the composer and does not send.
 
-`wait` polls for 5 seconds. `pty` reads the accumulated terminal log. `screen`, `status`, and `messages` read `ctl screen`, `state.status`, and `ctl messages`. Exit 0 is `{"ok":true,"via":...}`. Exit 1 means the text did not appear; the stderr JSON includes the reason and a short PTY tail.
+`wait` polls for 5 seconds. A `ctl` read that does not answer is killed when that deadline passes. `pty` reads the accumulated terminal log. `screen`, `status`, and `messages` read `ctl screen`, `state.status`, and `ctl messages`. Exit 0 is `{"ok":true,"via":...}`. Exit 1 means the text did not appear; the stderr JSON includes the reason and a short PTY tail.
 
 The PTY log is append-only. A string in it proves it was rendered at least once. It does not prove the string is still on screen, and a string that scrolled off is still in the log. Current inbox, draft, and message state come from `ctl`.
 
@@ -117,7 +117,7 @@ A proof needs both sides. The jsonl line is the key or `ctl` command that was se
 bun .cursor/skills/verify-crisp-tui/harness.ts cleanup
 ```
 
-Cleanup writes Ctrl+C to the PTY this run owns, waits for that TUI to exit, then signals only the recorded supervisor and TUI pids when their command lines and start times still match. It does not signal by process name. It removes `/tmp/crisp-tui-verify/<runId>` and does not remove `.cursor/skills/verify-crisp-tui/evidence/<runId>`. Stdout reports `evidenceDir` and `evidenceExists`. After a failed drive, run cleanup before launching the same id again so a dead supervisor does not keep the run directory.
+Cleanup writes Ctrl+C to the PTY this run owns, waits for that TUI to exit, then signals only the recorded supervisor and TUI pids when their command lines and start times still match. It does not signal by process name. It removes `/tmp/crisp-tui-verify/<runId>` and does not remove `.cursor/skills/verify-crisp-tui/evidence/<runId>`. Stdout reports `evidenceDir` and `evidenceExists`. After a failed drive, run cleanup so the run directory is gone before the next launch.
 
 Confirm a cited capture file is still on disk after cleanup returns. A cleanup that deletes that file is wrong.
 
