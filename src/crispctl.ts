@@ -6,6 +6,8 @@ import { capture } from "./subprocess"
 
 export function command(env = process.env): string[] {
   if (env.CRISPCTL_BIN) return [env.CRISPCTL_BIN]
+  // The npm Node launcher resolves its own dependency, independent of the working directory.
+  if (env.CRISP_TUI_NODE && env.CRISP_TUI_CRISPCTL) return [env.CRISP_TUI_NODE, env.CRISP_TUI_CRISPCTL]
   try { return [Bun.which("node") || "node", fileURLToPath(import.meta.resolve("crispctl/dist/index.js"))] } catch {}
   const installed = Bun.which("crispctl")
   if (installed) return [installed]

@@ -1,0 +1,24 @@
+{
+  "name": "crisp-tui-darwin-x64",
+  "version": "0.2.0",
+  "description": "Precompiled crisp-tui executable for darwin x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solcreek/crisp-tui.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/crisp-tui",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

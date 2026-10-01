@@ -11,7 +11,7 @@ const targets = process.env.CRISP_TUI_TEST_INSTALLED_ONLY ? ["installed"]
 for (const target of targets) test(`${target}: PTY TUI and separate ctl process share drafts, send, and shut down cleanly`, async () => {
   const dir = await mkdtemp("/tmp/otc-e2e-")
   const path = join(dir, "control.sock")
-  const argv = target === "installed" ? [resolve(installed!)] : target === "binary"
+  const argv: string[] = target === "installed" ? (process.env.CRISP_TUI_TEST_ARGV ? JSON.parse(process.env.CRISP_TUI_TEST_ARGV) : [resolve(installed!)]) : target === "binary"
     ? [binary]
     : [process.execPath, resolve(import.meta.dir, "../src/index.ts")]
   const env = { ...process.env, CRISP_TUI_SOCKET: path, TERM: "xterm-256color" }
@@ -27,7 +27,7 @@ for (const target of targets) test(`${target}: PTY TUI and separate ctl process 
     return JSON.parse(out)
   }
   async function until(check: () => Promise<boolean>, label: string) {
-    const end = Date.now() + 5000
+    const end = Date.now() + (target === "installed" ? 15_000 : 5000)
     while (Date.now() < end) {
       try { if (await check()) return } catch {}
       await Bun.sleep(30)
@@ -52,4 +52,4 @@ for (const target of targets) test(`${target}: PTY TUI and separate ctl process 
     child.terminal?.close()
     await rm(dir, { recursive: true, force: true })
   }
-}, 20_000)
+}, 30_000)

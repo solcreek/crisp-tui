@@ -3,7 +3,7 @@
 [![CI](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/solcreek/crisp-tui/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/crisp-tui?logo=npm)](https://www.npmjs.com/package/crisp-tui)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Bun: >=1.4.2](https://img.shields.io/badge/Bun-%3E%3D1.4.2-f9f1e1?logo=bun&logoColor=f9f1e1)](https://bun.sh)
+[![Node.js: >=20](https://img.shields.io/badge/Node.js-%3E%3D20-5fa04e?logo=nodedotjs)](https://nodejs.org)
 
 Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
@@ -18,11 +18,24 @@ for human review; all contacts and messages shown are demo data.
 
 ## Install
 
-Requires [Bun](https://bun.sh) 1.4.2 or newer and Node.js 20 or newer on macOS or Linux.
-The npm package installs the `crisp-tui` command; Bun must also be on PATH.
+Requires Node.js 20 or newer on macOS or Linux (glibc), on arm64 or x64.
+**Bun is not required for npm/npx users.** npm installs the matching precompiled
+executable, including the Bun runtime and OpenTUI renderer, automatically.
+Windows and musl/Alpine are not currently supported.
+
+This distribution targets v0.2.0. Until it is published, npm's v0.1.0 still
+requires a separate Bun installation.
+
+Try the demo without a global installation:
 
 ```sh
-npm install -g crisp-tui
+npx crisp-tui@0.2.0 --demo
+```
+
+Or install the command:
+
+```sh
+npm install -g crisp-tui@0.2.0
 crisp-tui --demo
 ```
 
@@ -32,6 +45,8 @@ with a crispctl profile configured, or `crisp-tui live --item 'Crisp development
 connection check. Add `--rtm-timeout 60` to require RTM authentication and an
 actual event within 60 seconds. The npm package includes crispctl as a dependency.
 The following `bun run` examples are for a source checkout.
+Keep npm optional dependencies enabled; they carry the platform executable.
+Installation requires no lifecycle scripts or first-run download.
 
 ## Run from source
 
@@ -135,7 +150,8 @@ All crispctl config and environment precedence still applies, including
 to crispctl. Select the same `--profile` / `--website` when issuing `ctl` commands.
 
 Executable lookup: `CRISPCTL_BIN` (one executable path, not a shell command),
-then the installed crispctl dependency, then `crispctl` on PATH, then
+then the npm launcher's bundled crispctl dependency, then the dependency resolved
+from a source checkout, then `crispctl` on PATH, then
 `../crisp-cli/dist/index.js` relative to this source
 checkout. The last option requires Node. A compiled TUI should use PATH or
 `CRISPCTL_BIN`. Credentials stay in the subprocess environment/config; commands
@@ -274,13 +290,18 @@ bun run test:package
 ```
 
 The standalone binary embeds Bun and the TUI renderer and needs crispctl on PATH
-or `CRISPCTL_BIN`. The npm package includes crispctl and needs Bun and Node on PATH.
+or `CRISPCTL_BIN`. The npm package includes crispctl and its platform executable;
+only Node.js is needed on PATH. Bun 1.4.2 is a development/build requirement.
 Tests exercise the UI with OpenTUI's
 headless renderer, send failures, concurrent navigation, draft isolation,
 polling/RTM cleanup, subprocess argument handling and the Unix control protocol.
 CI checks source and compiled PTY workflows, then packs and installs the npm
-artifact outside the checkout and runs its PTY workflow too. The package check
-downloads dependencies from npm; Crisp API access is not required.
+artifacts outside the checkout and runs their PTY workflows with Bun absent from
+PATH. A local test registry lets real `npm exec`/`npx` install the root package
+and choose the correct platform dependency automatically. Both installed and
+npx workflows exercise TUI startup, agent drafts, human send, shutdown and the
+crispctl bridge. The package check downloads dependencies from npm; Crisp API
+access is not required. CI runs on macOS/Linux arm64/x64 with Node.js 20 or 24.
 
 Coverage excludes test fixtures/helpers, checks for missing source files, and
 enforces overall 90% line and function thresholds from LCOV counts. CI uploads
@@ -288,6 +309,27 @@ enforces overall 90% line and function thresholds from LCOV counts. CI uploads
 the test process; PTY subprocess coverage
 (including the thin `src/index.ts` entrypoint) is not merged into that percentage.
 The subprocess tests independently verify the executable behavior.
+
+### Publishing platform packages
+
+All five package versions must match. `bun run build:package` compiles and stages
+the host platform under `packages/<os>-<arch>/bin/`. `bun run test:package` produces
+verified tarballs in `dist/npm/`. CI uploads them as `npm-<os>-<arch>` artifacts.
+
+Use artifacts from one successful CI run for the release commit. Publish all four
+platform packages first, then the main package, so new npx installs can always
+find their binary. This requires npm publisher credentials; CI does not publish.
+
+```sh
+gh run download RUN_ID --pattern 'npm-*' --dir release-artifacts
+for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+  npm publish "release-artifacts/npm-$platform/crisp-tui-$platform-0.2.0.tgz" --access public
+done
+npm publish release-artifacts/npm-darwin-arm64/crisp-tui-0.2.0.tgz --access public
+```
+
+Do not publish platform packages directly from an unbuilt workspace. The root
+package's optional dependencies are pinned to the exact release version.
 
 ## Development data and license
 

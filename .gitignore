@@ -24,3 +24,5 @@ captures/
 private/
 reports/
 *.tgz
+packages/*/bin/
+packages/*/LICENSE

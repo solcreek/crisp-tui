@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test"
-import { createClient, runner } from "../src/crispctl"
+import { command, createClient, runner } from "../src/crispctl"
 import { options } from "../src/cli"
 import { clean, messageText } from "../src/types"
+
+test("npm launcher uses its bundled crispctl and preserves explicit overrides", () => {
+  const env = { CRISP_TUI_NODE: "/runtime/node", CRISP_TUI_CRISPCTL: "/package/crispctl/dist/index.js" }
+  expect(command(env)).toEqual([env.CRISP_TUI_NODE, env.CRISP_TUI_CRISPCTL])
+  expect(command({ ...env, CRISPCTL_BIN: "/custom/crispctl" })).toEqual(["/custom/crispctl"])
+})
 
 test("adapter shares crispctl commands and passes arbitrary text as one argument", async () => {
   const calls: string[][] = []
