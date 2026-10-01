@@ -255,16 +255,19 @@ and writes. Consider this alongside the website token's documented daily quota.
 Conversation history is the latest page exposed by crispctl; there is no older
 message pagination, background daemon, push notifications, attachment upload or
 preview, persisted drafts, or MCP in this first version. Assignment and segments
-are available via the CLI bridge. The default tests use demo data, fake
+are available via the CLI bridge. The default tests use demo data, isolated
 subprocesses and local sockets; they never read 1Password or contact Crisp.
+Contract tests run the installed crispctl against an in-memory HTTP interceptor
+with external network access disabled.
 Real read-only checks are separate, explicitly invoked commands.
 
 ## Verification and binary
 
 ```sh
 bun run typecheck
-bun test
 bun run build
+bun run test:coverage
+bun run test:package
 ./dist/crisp-tui-darwin-arm64 --demo  # filename follows OS / architecture
 ```
 
@@ -272,7 +275,17 @@ The standalone binary embeds Bun and the TUI renderer and needs crispctl on PATH
 or `CRISPCTL_BIN`. The npm package includes crispctl and needs Bun and Node on PATH.
 Tests exercise the UI with OpenTUI's
 headless renderer, send failures, concurrent navigation, draft isolation,
-subprocess argument handling and the Unix control protocol.
+polling/RTM cleanup, subprocess argument handling and the Unix control protocol.
+CI checks source and compiled PTY workflows, then packs and installs the npm
+artifact outside the checkout and runs its PTY workflow too. The package check
+downloads dependencies from npm; Crisp API access is not required.
+
+Coverage excludes test fixtures/helpers, checks for missing source files, and
+enforces overall 90% line and function thresholds from LCOV counts. CI uploads
+`coverage/lcov.info` for each platform. The report measures code executed within
+the test process; PTY subprocess coverage
+(including the thin `src/index.ts` entrypoint) is not merged into that percentage.
+The subprocess tests independently verify the executable behavior.
 
 ## Development data and license
 
