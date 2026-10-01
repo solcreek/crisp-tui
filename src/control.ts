@@ -106,7 +106,9 @@ function string(params: Record<string, unknown>, key: string) {
   return value
 }
 export function controller(store: Store, focus: () => void = () => {}) {
-  // Serialize screen-changing agent requests so overlapping drafts cannot land in another session.
+  // Local snapshots stay observable while screen-changing requests wait on I/O.
+  const snapshots = new Set(["state", "screen", "conversations", "messages"])
+  // Serialize screen-changing requests so overlapping drafts cannot land in another session.
   let pending = Promise.resolve<unknown>(null)
   const handle = async (method: string, params: Record<string, unknown>) => {
     switch (method) {
@@ -143,6 +145,7 @@ export function controller(store: Store, focus: () => void = () => {}) {
     }
   }
   return (method: string, params: Record<string, unknown>) => {
+    if (snapshots.has(method)) return handle(method, params)
     const task = pending.then(() => handle(method, params))
     pending = task.catch(() => {})
     return task

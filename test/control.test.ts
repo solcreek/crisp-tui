@@ -32,3 +32,20 @@ test("server never removes an ordinary file at socket path", async () => {
   await expect(serve(p, () => null)).rejects.toThrow("non-socket")
   expect(await Bun.file(p).text()).toBe("keep")
 })
+
+test("socket snapshots remain responsive while refresh is waiting on network I/O", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const list = client.list, started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  client.list = async (...args) => { started.resolve(); await release.promise; return list(...args) }
+  const p = await path(), server = await serve(p, controller(store))
+  cleanups.push(() => server.stop())
+  const refreshing = request(p, "refresh")
+  await started.promise
+  try {
+    expect(await request(p, "state", {}, 1000)).toMatchObject({ loading: true, selectedSession: "session_demo_1" })
+    expect(await request(p, "screen", {}, 1000)).toContain("Demo Customer A")
+    expect(await request(p, "conversations", {}, 1000)).toHaveLength(3)
+    expect(await request(p, "messages", {}, 1000)).toHaveLength(1)
+  } finally { release.resolve(); await refreshing }
+})
