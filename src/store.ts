@@ -207,7 +207,6 @@ export class Store {
     if (this.refreshTask) await this.refreshTask.catch(() => {})
     return this.refresh()
   }
-  snapshot() { return { ...this.state, draft: this.draft(), protocol: 1 } }
   screen() {
     const s = this.state
     return clean([

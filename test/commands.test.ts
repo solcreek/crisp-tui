@@ -97,7 +97,7 @@ test("control queue is bounded while snapshots remain available", async () => {
   const pending = Array.from({ length: 64 }, () => handle("refresh", {}))
   try {
     await expect(handle("goto", { session: "session_demo_2" })).rejects.toThrow("queue is full")
-    expect(await handle("state", {})).toHaveProperty("protocol", 1)
+    expect(await handle("state", {})).toHaveProperty("protocol", 2)
   } finally { release.resolve(); await Promise.all(pending) }
   await handle("goto", { session: "session_demo_2" })
 })

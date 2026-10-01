@@ -17,7 +17,7 @@ test("private socket exposes state and drafts end to end", async () => {
   await store.refresh()
   const server = await serve(p, controller(store)); cleanups.push(() => server.stop())
   expect((await stat(p)).mode & 0o777).toBe(0o600)
-  expect(await request(p, "state")).toMatchObject({ protocol: 1, source: "DEMO · local only" })
+  expect(await request(p, "state")).toMatchObject({ protocol: 2, source: "DEMO · local only" })
   expect(await request(p, "draft", { session: "session_demo_2", text: "中文草稿", note: true })).toMatchObject({ sent: false })
   expect(await request(p, "screen")).toContain("中文草稿")
   await expect(request(p, "send")).rejects.toThrow("Unknown")
@@ -47,8 +47,8 @@ test("socket snapshots remain responsive while refresh is waiting on network I/O
   try {
     expect(await request(p, "state", {}, 1000)).toMatchObject({ loading: true, selectedSession: "session_demo_1" })
     expect(await request(p, "screen", {}, 1000)).toContain("Demo Customer A")
-    expect(await request(p, "conversations", {}, 1000)).toHaveLength(3)
-    expect(await request(p, "messages", {}, 1000)).toHaveLength(1)
+    expect(await request(p, "conversations", {}, 1000)).toMatchObject({ total: 3 })
+    expect(await request(p, "messages", {}, 1000)).toMatchObject({ total: 1 })
   } finally { release.resolve(); await refreshing }
 })
 

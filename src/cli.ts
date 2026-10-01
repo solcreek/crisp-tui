@@ -29,6 +29,7 @@ export function options(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
     demo: { type: "boolean" }, "read-only": { type: "boolean" }, profile: { type: "string", default: process.env.CRISPCTL_PROFILE || "sandbox" },
     website: { type: "string" }, poll: { type: "string", default: "60" },
+    offset: { type: "string" }, limit: { type: "string" }, revision: { type: "string" },
     note: { type: "boolean" }, replace: { type: "boolean" }, help: { type: "boolean", short: "h" },
   } })
   const poll = Number(values.poll)
@@ -58,7 +59,7 @@ export async function main(args: string[]) {
     console.log(parsed.command.output === "text" ? result : JSON.stringify(result))
     return 0
   }
-  if ((mode && mode !== "tui") || verb || rest.length || opts.note || opts.replace) throw new CliError("Unknown command or option. Use --help; API commands go after 'cli'.", 2)
+  if ((mode && mode !== "tui") || verb || rest.length || opts.note || opts.replace || opts.offset !== undefined || opts.limit !== undefined || opts.revision !== undefined) throw new CliError("Unknown command or option. Use --help; API commands go after 'cli'.", 2)
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new CliError("The TUI needs an interactive terminal. Use ctl or cli for agent workflows.", 2)
   const readOnly = opts["read-only"] || process.env.CRISPCTL_READ_ONLY === "1"
   let client

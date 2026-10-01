@@ -37,7 +37,7 @@ for (const mode of ["flag", "env", "tier", "missing"] as const) test(`profile TU
         return state.active?.session_id === "session_fixture" && state.realtime === "authenticated"
       })
       expect(await request(socket, "state")).toMatchObject({ readOnly: true, source: "synthetic · website 11111111-1111-1111-1111-111111111111" })
-      expect(await request(socket, "messages")).toMatchObject([{ content: "Synthetic profile message" }])
+      expect(await request(socket, "messages")).toMatchObject({ items: [{ content: "Synthetic profile message" }] })
       await expect(request(socket, "draft", { session: "session_fixture", text: "blocked" })).rejects.toThrow("Read-only")
       // Human write shortcuts are disabled too.
       child.terminal!.write("\x05\x15\r")
