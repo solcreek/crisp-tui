@@ -17,6 +17,7 @@
     "live:check": "bun run scripts/live-readonly.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:package": "bun run scripts/test-package.ts",
     "build": "bun run scripts/build.ts",
     "build:package": "bun run scripts/build-package.ts",
     "prepack": "bun run build:package"

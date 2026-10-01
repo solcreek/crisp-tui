@@ -5,7 +5,9 @@ import { join, resolve } from "node:path"
 
 const binary = resolve(import.meta.dir, `../dist/crisp-tui-${process.platform}-${process.arch}`)
 const installed = process.env.CRISP_TUI_TEST_INSTALLED
-const targets = ["source", ...(existsSync(binary) ? ["binary"] : []), ...(installed ? ["installed"] : [])]
+if (process.env.CRISP_TUI_TEST_INSTALLED_ONLY && !installed) throw new Error("Installed package test requires CRISP_TUI_TEST_INSTALLED")
+const targets = process.env.CRISP_TUI_TEST_INSTALLED_ONLY ? ["installed"]
+  : ["source", ...(existsSync(binary) ? ["binary"] : []), ...(installed ? ["installed"] : [])]
 for (const target of targets) test(`${target}: PTY TUI and separate ctl process share drafts, send, and shut down cleanly`, async () => {
   const dir = await mkdtemp("/tmp/otc-e2e-")
   const path = join(dir, "control.sock")
