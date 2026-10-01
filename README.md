@@ -168,6 +168,8 @@ mode are kept separately for each conversation during this process.
 A failed send keeps the draft; writes are never retried automatically. A timeout
 can leave the send outcome unknown, so refresh before resending. Once a send is
 acknowledged, a failed follow-up refresh does not restore the draft.
+One-shot crispctl calls have a 30-second deadline; 1Password reads have a
+60-second deadline. Partial output from a timed-out process is discarded.
 
 ## Agent workflow
 

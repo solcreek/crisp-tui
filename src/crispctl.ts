@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Conversation, CrispClient, Message, RealtimeSubscribe } from "./types"
+import { capture } from "./subprocess"
 
 export function command(env = process.env): string[] {
   if (env.CRISPCTL_BIN) return [env.CRISPCTL_BIN]
@@ -17,24 +18,20 @@ export class CliError extends Error {
   constructor(message: string, public code = 1) { super(message) }
 }
 export type Runner = (args: string[]) => Promise<unknown>
-export function runner(prefix: string[], global: string[] = [], env = process.env): Runner {
+export function runner(prefix: string[], global: string[] = [], env = process.env, timeoutMs = 30_000): Runner {
   return async (args) => {
-    const child = Bun.spawn([...prefix, ...global, "--json", ...args], {
-      stdin: "ignore", stdout: "pipe", stderr: "pipe", env,
-    })
-    const timer = setTimeout(() => child.kill(), 30_000)
-    try {
-      const [out, err, code] = await Promise.all([
-        new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
-      ])
-      if (code !== 0) {
-        let message = "crispctl failed or timed out"
-        // Only relay crispctl's structured, redacted error; never raw process output.
-        try { message = JSON.parse(err).message || message } catch {}
-        throw new CliError(message, code || 1)
-      }
-      try { return JSON.parse(out) } catch { throw new CliError("crispctl returned invalid JSON") }
-    } finally { clearTimeout(timer) }
+    const { stdout, stderr, code, timedOut } = await capture([...prefix, ...global, "--json", ...args], timeoutMs, env)
+    if (timedOut) throw new CliError("crispctl timed out; refresh before retrying a write")
+    if (code !== 0) {
+      let message = "crispctl failed or timed out"
+      // Only relay crispctl's structured, redacted error; never raw process output.
+      try {
+        const error = JSON.parse(stderr)
+        if (typeof error?.message === "string" && error.message) message = error.message
+      } catch {}
+      throw new CliError(message, code || 1)
+    }
+    try { return JSON.parse(stdout) } catch { throw new CliError("crispctl returned invalid JSON") }
   }
 }
 function array<T>(value: unknown, key: string): T[] {

@@ -36,7 +36,7 @@ const item = { fields: [
 ] }
 function fixtures(output = JSON.stringify(item)) {
   environment({ CRISPCTL_BIN: join(scratch, "crispctl"),
-    CRISPCTL_CONFIG: join(scratch, "nonexistent.json"), TEST_OP_OUTPUT: output, TEST_OP_EXIT: "0", TEST_BRIDGE_EXIT: "" })
+    CRISPCTL_CONFIG: join(scratch, "nonexistent.json"), TEST_OP_OUTPUT: output, TEST_OP_EXIT: "0", TEST_OP_HANG: "0", TEST_BRIDGE_EXIT: "" })
 }
 const readCredentials = (name: string, id?: string) => loadWebsiteCredentials(name, id, join(scratch, "op"))
 
@@ -63,6 +63,12 @@ test("live check exercises rendering and RTM with synthetic credentials, printin
       conversationsOnPage: 1, messagesInOpenedConversation: 1, rtm: { authenticated: true, received: 1 } })
     for (const secret of ["fake-secret", "Synthetic Private Contact", "Synthetic private customer message"]) expect(output).not.toContain(secret)
   } finally { log.mockRestore() }
+})
+
+test("1Password deadline rejects partial credentials instead of waiting indefinitely", async () => {
+  fixtures()
+  environment({ TEST_OP_HANG: "1" })
+  await expect(loadWebsiteCredentials("Synthetic item", undefined, join(scratch, "op"), 200)).rejects.toThrow("1Password request timed out")
 })
 
 test("live entrypoint rejects missing items and invalid RTM bounds before credentials", async () => {
