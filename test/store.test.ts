@@ -141,7 +141,7 @@ test("a list arriving during navigation preserves the selected conversation", as
   await listed.promise
   const opening = store.open(second)
   await opened.promise
-  expect(store.snapshot()).toMatchObject({ selectedSession: second, conversationLoading: true })
+  expect(store.state).toMatchObject({ selectedSession: second, conversationLoading: true })
   releaseList.resolve(); await refreshing
   expect(store.state.selectedSession).toBe(second)
   releaseOpen.resolve(); await opening
@@ -201,4 +201,115 @@ test("a failed obsolete search cannot overwrite a newer search's state", async (
   client.list = async () => { throw new Error("current failure") }
   await store.perform(() => store.list("current"))
   expect(store.state.error).toBe("current failure")
+})
+
+for (const initial of [true, false]) test(`refresh retries a failed ${initial ? "initial" : "navigated"} conversation without losing drafts`, async () => {
+  const client = demoClient(), store = new Store(client), get = client.get
+  if (!initial) { await store.refresh(); store.setDraft("keep first draft") }
+  let calls = 0
+  client.get = async id => { if (++calls === 1) throw new Error("temporary failure"); return get(id) }
+  await store.perform(() => initial ? store.refresh() : store.open(second))
+  expect(store.state.active).toBeNull()
+  expect(store.state.error).toBe("temporary failure")
+  expect(store.state.conversationLoading).toBe(false)
+  expect(store.state.status).not.toBe("Loading conversation…")
+  await store.refresh()
+  expect(calls).toBe(2)
+  expect(store.state.active?.session_id).toBe(initial ? first : second)
+  expect(store.state.error).toBe("")
+  if (!initial) expect(store.state.drafts[first]?.text).toBe("keep first draft")
+})
+
+test("repeated recovery failures remain visible and do not switch to the first conversation", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  client.get = async () => { throw new Error("still offline") }
+  await store.perform(() => store.open(second))
+  await store.perform(() => store.refresh())
+  expect(store.state.selectedSession).toBe(second)
+  expect(store.state.active).toBeNull()
+  expect(store.state.error).toBe("still offline")
+})
+
+test("a failed background message read cannot report an error on a newly selected conversation", async () => {
+  const client = demoClient(), store = new Store(client), messages = client.messages
+  await store.refresh()
+  const old = Promise.withResolvers<never>(), started = Promise.withResolvers<void>()
+  client.messages = id => { if (id === first) { started.resolve(); return old.promise }; return messages(id) }
+  const poll = store.perform(() => store.refresh())
+  await started.promise; await store.open(second)
+  old.reject(new Error("obsolete failure")); await poll
+  expect(store.state.active?.session_id).toBe(second)
+  expect(store.state.error).toBe("")
+})
+
+for (const fails of [false, true]) test(`an older poll ${fails ? "failure" : "success"} preserves a newer send failure`, async () => {
+  const client = demoClient(), store = new Store(client), messages = client.messages
+  await store.refresh()
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  client.messages = async id => { started.resolve(); await release.promise; if (fails) throw new Error("old poll failed"); return messages(id) }
+  const poll = store.perform(() => store.refresh())
+  await started.promise
+  store.setDraft("unsent")
+  client.reply = async () => { throw new Error("send failed") }
+  await store.perform(() => store.send())
+  release.resolve(); await poll
+  expect(store.state.error).toBe("send failed")
+  expect(store.state.errorSource).toBe("send")
+  expect(store.draft().text).toBe("unsent")
+  client.messages = messages
+  await store.refresh()
+  expect(store.state.error).toBe("send failed")
+  client.reply = async () => {}
+  await store.send()
+  expect(store.state.error).toBe("")
+})
+
+test("RTM recovery clears only its own error", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  store.setRealtime({ state: "error", message: "RTM offline" })
+  await store.refresh()
+  expect(store.state.error).toBe("RTM offline")
+  store.setRealtime({ state: "authenticated" })
+  expect(store.state.error).toBe("")
+  store.setDraft("unsent")
+  client.reply = async () => { throw new Error("send failed") }
+  await store.perform(() => store.send())
+  store.setRealtime({ state: "authenticated" })
+  expect(store.state.error).toBe("send failed")
+})
+
+test("background diagnostics cannot hide a pending send failure and recover independently", async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh(); store.setDraft("unsent")
+  const release = Promise.withResolvers<void>()
+  client.reply = async () => { await release.promise; throw new Error("send failed") }
+  const sending = store.perform(() => store.send())
+  store.setRealtime({ state: "error", message: "RTM offline" })
+  release.resolve(); await sending
+  expect(store.state.error).toBe("send failed")
+  client.list = async () => { throw new Error("list offline") }
+  await store.perform(() => store.refresh())
+  expect(store.state.error).toBe("send failed")
+  store.setRealtime({ state: "authenticated" })
+  expect(store.state.error).toBe("send failed")
+  client.reply = async () => {}
+  await store.send()
+  expect(store.state.error).toBe("list offline")
+  client.list = demoClient().list
+  await store.refresh()
+  expect(store.state.error).toBe("")
+})
+
+for (const kind of ["state", "read"] as const) test(`${kind} failures survive refresh and clear after the matching action succeeds`, async () => {
+  const client = demoClient(), store = new Store(client)
+  await store.refresh()
+  const action = () => kind === "state" ? store.changeState() : store.markRead()
+  client[kind] = async () => { throw new Error(`${kind} failed`) }
+  await store.perform(action); await store.refresh()
+  expect(store.state.errorSource).toBe(kind)
+  client[kind] = async () => {}
+  await action()
+  expect(store.state.error).toBe("")
 })
