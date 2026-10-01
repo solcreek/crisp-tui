@@ -7,7 +7,7 @@
 
 Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
-[crispctl](https://github.com/solcreek/crisp-cli) v0.2.0 provides all REST and RTM
+[crispctl](https://github.com/solcreek/crisp-cli) v0.3.0 provides all REST and RTM
 access. Both profile-based and 1Password sessions use its JSON interface;
 this project has no separate HTTP or Socket.IO implementation.
 
@@ -104,10 +104,10 @@ requests use Basic auth with `identifier:key` and `X-Crisp-Tier: website`.
 The token belongs to one workspace. `crispctl` supplies these headers; this
 project never includes the secret in UI state or stores a second copy.
 
-The npm installation includes crispctl v0.2.0. To configure it separately on PATH:
+This source checkout uses crispctl v0.3.0. To configure it separately on PATH:
 
 ```sh
-npm install -g crispctl@0.2.0
+npm install -g crispctl@0.3.0
 ```
 
 Alternatively, build [crisp-cli from source](https://github.com/solcreek/crisp-cli#install)
