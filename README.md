@@ -476,6 +476,10 @@ makes three REST requests. A quiet TUI polling every 60 seconds uses approximate
 4,320 requests/day, with additional calls for RTM-triggered refreshes, searches
 and writes. Consider this alongside the website token's documented daily quota.
 
+Messages render Markdown escapes, emphasis, headings, lists, links and code.
+Backslashes inside code stay literal, and link destinations remain visible.
+Raw message content returned by control commands is unchanged.
+
 Conversation history is the latest page exposed by crispctl; there is no older
 message pagination, background daemon, push notifications, attachment upload or
 preview, persisted drafts, or MCP in this first version. Assignment and segments

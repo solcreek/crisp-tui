@@ -8,5 +8,11 @@
   "render.100.draft": 100,
   "render.1000.mount": 2500,
   "render.1000.unchanged_refresh": 1000,
-  "render.1000.draft": 250
+  "render.1000.draft": 250,
+  "render.markdown.100.mount": 500,
+  "render.markdown.100.unchanged_refresh": 200,
+  "render.markdown.100.draft": 100,
+  "render.markdown.1000.mount": 2500,
+  "render.markdown.1000.unchanged_refresh": 1000,
+  "render.markdown.1000.draft": 250
 }
