@@ -7,12 +7,15 @@ import { conversationDetails } from "../details"
 import { DetailsPanel } from "./DetailsPanel"
 import { clean, label } from "../types"
 import { MessageBody } from "./MessageBody"
+import { ImagePreviews } from "../images"
 
 const color = { bg: "#111823", panel: "#182333", fg: "#dbe7f7", dim: "#8799b2", blue: "#54a5ff", line: "#2b3d54", green: "#6ad6b1", note: "#f0c36a", error: "#ff929b" }
 type Pane = "inbox" | "messages" | "composer" | "search" | "details"
 
-export function App(props: { store: Store; bindFocus?: (fn: () => void) => void; layout?: LayoutConfig }) {
+export function App(props: { store: Store; bindFocus?: (fn: () => void) => void; layout?: LayoutConfig; previews?: ImagePreviews }) {
   const store = props.store
+  const previews = props.previews ?? new ImagePreviews()
+  onCleanup(() => { if (!props.previews) previews.dispose() })
   const [state, setState] = createSignal(store.state)
   const unsubscribe = store.subscribe(() => setState(store.state))
   onCleanup(unsubscribe)
@@ -128,7 +131,7 @@ export function App(props: { store: Store; bindFocus?: (fn: () => void) => void;
               {m.type === "note" ? " · INTERNAL NOTE" : ""}
               <span style={{ fg: color.dim }}>{m.timestamp ? `  ${new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
             </text>
-            <MessageBody message={m} />
+            <MessageBody message={m} previews={previews} rows={dims().height} />
           </box>}</For>
           <Show when={state().messagesReady && !state().messages.length}><text fg={color.dim} marginTop={1}>No messages.</text></Show>
         </scrollbox>

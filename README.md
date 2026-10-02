@@ -9,7 +9,8 @@ Crisp support inbox built with OpenTUI, SolidJS and Bun. People use the TUI;
 agents use JSON commands and can prepare drafts in the same running screen.
 [crispctl](https://github.com/solcreek/crisp-cli) v0.5.0 provides all REST and RTM
 access. Both profile-based and 1Password sessions use its JSON interface;
-this project has no separate HTTP or Socket.IO implementation.
+this project has no separate Crisp REST or Socket.IO implementation. Image
+previews download attachments directly from Crisp's CDN.
 
 ![crisp-tui running in Ghostty on Omarchy, with a configurable sidebar showing contact details, custom data and visitor information alongside an agent-prepared reply draft](docs/images/crisp-tui-sidebar-omarchy.png)
 
@@ -480,9 +481,23 @@ Messages render Markdown escapes, emphasis, headings, lists, links and code.
 Backslashes inside code stay literal, and link destinations remain visible.
 Raw message content returned by control commands is unchanged.
 
+PNG, JPEG, WebP and GIF attachments display inline. OpenTUI selects Kitty graphics
+or Sixel when supported, with colored character blocks as a fallback. GIFs show a
+static preview. Previews fit the message pane and begin loading when scrolled
+into view; slow or broken images do not delay conversation text or navigation.
+The filename and URL remain visible if a preview cannot load.
+
+Automatic previews only fetch HTTPS URLs on `storage.crisp.chat` and
+`image.crisp.chat`, including redirects. Downloads are anonymous GETs without
+Crisp credentials or cookies, with two concurrent requests and a 12-second
+timeout. Each image is limited to 8 MiB and 16 million pixels; displayed copies
+are reduced to a maximum 1024-pixel edge. The session-only byte cache holds at
+most 16 MiB / 32 attachments and writes nothing to disk. Other hosts, SVGs,
+documents and Markdown image links remain text links.
+
 Conversation history is the latest page exposed by crispctl; there is no older
-message pagination, background daemon, push notifications, attachment upload or
-preview, persisted drafts, or MCP in this first version. Assignment and segments
+message pagination, background daemon, push notifications, attachment upload,
+persisted drafts, or MCP in this first version. Assignment and segments
 are available via the CLI bridge. The default tests use demo data, isolated
 subprocesses and local sockets; they never read 1Password or contact Crisp.
 Contract tests run the installed crispctl against an in-memory HTTP interceptor
